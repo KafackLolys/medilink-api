@@ -57,6 +57,97 @@ $ npm run test:e2e
 $ npm run test:cov
 ```
 
+## Firebase Authentication
+
+Authentication operations run through the NestJS API. The client sends
+registration credentials (`firstName`, `lastName`, `phone`, `role`, `email`,
+`password`, and optional doctor `specialty` / `registrationNumber`) to
+`POST /auth/register`. NestJS creates the Firebase Authentication account,
+sends an email-verification message, and stores the profile in
+`users/{uid}` in Firestore. Passwords are never stored in Firestore.
+
+`POST /auth/login` accepts `{ "email", "password" }`. A successful login
+returns `{ "user", "idToken", "refreshToken", "expiresIn", "tokenType" }`.
+Store the returned tokens securely on the client; JSON tokens are accessible
+to JavaScript and therefore should not be stored in `localStorage` where
+possible. Send the ID token to protected routes:
+
+```http
+Authorization: Bearer <id-token>
+```
+
+`POST /auth/refresh` accepts `{ "refreshToken" }` and returns a new token
+pair. `POST /auth/logout` requires the ID token and revokes all refresh tokens
+for that Firebase account. `POST /auth/reset-password` accepts `{ "email" }`
+and sends a Firebase password-reset email without revealing whether the
+account exists. `GET /auth/profile` returns the authenticated Firestore
+profile as `{ "user": ..., "patient": ... }`. The patient object uses stored
+patient details when available and safe defaults otherwise. Passwords and
+refresh tokens are not stored in Firestore.
+
+### Firebase credentials
+
+NestJS loads environment variables from the ignored `.env` file. For local
+development, set the three service-account values there:
+
+```dotenv
+FIREBASE_PROJECT_ID=your-firebase-project-id
+FIREBASE_CLIENT_EMAIL=firebase-adminsdk-...@your-firebase-project-id.iam.gserviceaccount.com
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+FIREBASE_WEB_API_KEY=your-firebase-web-api-key
+```
+
+Get these values from your Firebase project's service-account settings. Keep
+the private key secret and never commit it. Also set
+`FIREBASE_WEB_API_KEY` from the Firebase project's web-app configuration;
+it is required for server-side password sign-up, login, reset and refresh.
+In Firebase Console, open **Authentication → Sign-in method** and enable
+**Email/Password** for the same project. If registration returns
+`CONFIGURATION_NOT_FOUND`, verify that Authentication is set up and that
+`FIREBASE_WEB_API_KEY` and `FIREBASE_PROJECT_ID` both belong to that project.
+The API also supports Google
+Application Default Credentials, for example by setting
+`GOOGLE_APPLICATION_CREDENTIALS` to the path of a service-account JSON file;
+on Google Cloud, use the workload's attached service account instead. If only
+some `FIREBASE_*` service-account values are set, startup fails with a
+configuration error rather than passing incomplete credentials to Firebase.
+
+### Supabase Storage for medical attachments
+
+Create a **private** Storage bucket in Supabase (the local configuration uses
+`images`) and set these backend-only environment variables:
+
+```dotenv
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+SUPABASE_STORAGE_BUCKET=images
+```
+
+The NestJS API uploads validated files using the service-role key and stores
+the private Storage object URL and path with the medical need in Firestore.
+Files are limited to five per request and 10 MB per file. Never expose the
+service-role key in the Next.js environment or make the medical-files bucket
+public; use authenticated, short-lived signed URLs when a client needs to
+view an attachment.
+
+### Patient medical needs
+
+The authenticated patient routes are `GET /needs` (list), `POST /needs`
+(create with multipart fields `data` and optional repeated `files`),
+`GET /needs/:id` (details), `PATCH /needs/:id` (update title, specialty,
+description and consultation mode), `PATCH /needs/:id/close`, and
+`DELETE /needs/:id` (drafts only). All routes verify the Firebase ID token and
+the request owner. Detail responses include short-lived signed URLs for that
+patient's private attachments.
+
+### Frontend CORS
+
+The API permits `http://localhost:4000` by default for local frontend
+development. Set `CORS_ORIGINS` to a comma-separated list of trusted frontend
+origins in other environments, for example
+`CORS_ORIGINS=https://app.example.com`. The API allows the `Authorization`
+and `Content-Type` headers and credentials for browser requests.
+
 ## Deployment
 
 When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
