@@ -18,12 +18,14 @@ import {
   type NeedAttachment,
   NeedPriority,
   NeedStatus,
+  NotificationType,
   type DoctorProfile,
   type DoctorProposal,
   ProposalStatus,
   type User,
 } from '../interfaces/database';
 import { FirebaseService } from '../firebase/firebase.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_FILES = 5;
@@ -99,6 +101,11 @@ export interface PatientNeedDetail extends PatientNeedListItem {
   }>;
 }
 
+export interface DoctorNeedDetail extends Omit<PatientNeedDetail, 'priority'> {
+  priority: NeedPriority;
+  availableFrom: string | null;
+}
+
 interface UpdateNeedRequest {
   title: string;
   specialty: string;
@@ -146,11 +153,47 @@ export interface CreateProposalRequest {
   details?: string;
 }
 
+export interface DoctorProposalFilters {
+  status?: string;
+  page?: string;
+  pageSize?: string;
+}
+
+export interface DoctorProposalListItem {
+  id: string;
+  needId: string;
+  needTitle: string;
+  specialty: string;
+  city: string;
+  district: string;
+  status: ProposalStatus;
+  message: string;
+  proposedAt: string;
+  proposedAppointmentAt: string | null;
+  consultationMode: ConsultationMode;
+  fee: number;
+  currency: string;
+  patientResponse: string | null;
+  respondedAt: string | null;
+}
+
+export interface PaginatedDoctorProposals {
+  items: DoctorProposalListItem[];
+  counts: Record<ProposalStatus, number>;
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
 @Injectable()
 export class NeedsService {
   private readonly logger = new Logger(NeedsService.name);
 
-  constructor(private readonly firebase: FirebaseService) {}
+  constructor(
+    private readonly firebase: FirebaseService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   async listForDoctor(
     firebaseUser: DecodedIdToken,
@@ -168,6 +211,24 @@ export class NeedsService {
     if (search.length > 100) {
       throw new BadRequestException('q must be 100 characters or fewer');
     }
+    if (
+      filters.specialty &&
+      (filters.specialty.trim().length > 100 || !filters.specialty.trim())
+    ) {
+      throw new BadRequestException('specialty must be 1 to 100 characters');
+    }
+    if (
+      filters.priority &&
+      !Object.values(NeedPriority).includes(filters.priority)
+    ) {
+      throw new BadRequestException('priority is invalid');
+    }
+    if (
+      filters.mode &&
+      !Object.values(ConsultationMode).includes(filters.mode)
+    ) {
+      throw new BadRequestException('consultation mode is invalid');
+    }
 
     const firestore = this.firebase.getFirestore();
     const snapshot = await firestore
@@ -178,14 +239,34 @@ export class NeedsService {
         NeedStatus.PROPOSALS_RECEIVED,
       ])
       .get();
-    const availableNeeds = snapshot.docs
-      .map((document) => document.data() as MedicalNeed)
-      .filter((need) => need.ownerUserId !== firebaseUser.uid);
+    const availableNeeds = (
+      await Promise.all(
+        snapshot.docs.map(async (document) => {
+          const need = document.data() as MedicalNeed;
+          if (need.ownerUserId === firebaseUser.uid) return null;
+          const ownerSnapshot = await firestore
+            .collection('users')
+            .doc(need.ownerUserId)
+            .get();
+          if (
+            !ownerSnapshot.exists ||
+            (ownerSnapshot.data() as User).role !== AccountRole.PATIENT
+          ) {
+            return null;
+          }
+          return { ...need, id: need.id || document.id };
+        }),
+      )
+    ).filter((need): need is MedicalNeed => need !== null);
     const specialties = [...new Set(availableNeeds.map((need) => need.specialty))]
       .filter(Boolean)
       .sort((left, right) => left.localeCompare(right, 'fr'));
     const filtered = availableNeeds
-      .filter((need) => !filters.specialty || need.specialty === filters.specialty)
+      .filter(
+        (need) =>
+          !filters.specialty ||
+          need.specialty === filters.specialty.trim(),
+      )
       .filter((need) => !filters.priority || need.priority === filters.priority)
       .filter(
         (need) =>
@@ -238,7 +319,7 @@ export class NeedsService {
   async getForDoctor(
     firebaseUser: DecodedIdToken,
     id: string,
-  ): Promise<PatientNeedDetail> {
+  ): Promise<DoctorNeedDetail> {
     await this.getVerifiedDoctor(firebaseUser.uid);
     const snapshot = await this.firebase
       .getFirestore()
@@ -249,8 +330,15 @@ export class NeedsService {
       throw new NotFoundException('Medical need not found');
     }
     const need = snapshot.data() as MedicalNeed;
+    const ownerSnapshot = await this.firebase
+      .getFirestore()
+      .collection('users')
+      .doc(need.ownerUserId)
+      .get();
     if (
       need.ownerUserId === firebaseUser.uid ||
+      !ownerSnapshot.exists ||
+      (ownerSnapshot.data() as User).role !== AccountRole.PATIENT ||
       ![
         NeedStatus.PUBLISHED,
         NeedStatus.AWAITING_PROPOSALS,
@@ -295,8 +383,10 @@ export class NeedsService {
       city: need.city,
       district: need.district,
       privateAddress: null,
-      priority:
-        need.priority === NeedPriority.URGENT ? 'rapide' : 'normal',
+      priority: need.priority,
+      availableFrom: need.availableFrom
+        ? dateFromFirestore(need.availableFrom).toISOString()
+        : null,
       attachments,
     };
   }
@@ -390,7 +480,153 @@ export class NeedsService {
       });
     });
 
+    try {
+      await this.notifications.publish({
+        userId: need.ownerUserId,
+        type: NotificationType.PROPOSAL_RECEIVED,
+        title: 'Nouvelle proposition',
+        body: 'Un médecin a répondu à votre demande.',
+        targetUrl: `/patient/demandes/${encodeURIComponent(needId)}`,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to create notification for proposal ${proposalRef.id}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+
     return { id: proposalRef.id };
+  }
+
+  async listProposalsForDoctor(
+    firebaseUser: DecodedIdToken,
+    filters: DoctorProposalFilters,
+  ): Promise<PaginatedDoctorProposals> {
+    const doctor = await this.getVerifiedDoctor(firebaseUser.uid);
+    const page = this.parsePositiveInteger(filters.page, 1, 'page', 1_000_000);
+    const pageSize = this.parsePositiveInteger(
+      filters.pageSize,
+      10,
+      'pageSize',
+      50,
+    );
+    if (
+      filters.status &&
+      !Object.values(ProposalStatus).includes(filters.status as ProposalStatus)
+    ) {
+      throw new BadRequestException('proposal status is invalid');
+    }
+
+    const firestore = this.firebase.getFirestore();
+    const proposalsSnapshot = await firestore
+      .collection('doctorProposals')
+      .where('doctorProfileId', '==', doctor.id)
+      .get();
+    const counts: Record<ProposalStatus, number> = {
+      [ProposalStatus.SENT]: 0,
+      [ProposalStatus.PENDING]: 0,
+      [ProposalStatus.ACCEPTED]: 0,
+      [ProposalStatus.REJECTED]: 0,
+      [ProposalStatus.EXPIRED]: 0,
+      [ProposalStatus.CANCELLED]: 0,
+    };
+
+    const items = (
+      await Promise.all(
+        proposalsSnapshot.docs.map(async (document) => {
+          const proposal = document.data() as DoctorProposal;
+          if (!Object.values(ProposalStatus).includes(proposal.status)) {
+            return null;
+          }
+          const needSnapshot = await firestore
+            .collection('medicalNeeds')
+            .doc(proposal.needId)
+            .get();
+          if (!needSnapshot.exists) return null;
+          const need = needSnapshot.data() as MedicalNeed;
+          const ownerSnapshot = await firestore
+            .collection('users')
+            .doc(need.ownerUserId)
+            .get();
+          if (
+            !ownerSnapshot.exists ||
+            (ownerSnapshot.data() as User).role !== AccountRole.PATIENT
+          ) {
+            return null;
+          }
+
+          counts[proposal.status] += 1;
+          return {
+            id: proposal.id || document.id,
+            needId: proposal.needId,
+            needTitle: need.title,
+            specialty: need.specialty,
+            city: need.city,
+            district: need.district,
+            status: proposal.status,
+            message: proposal.message,
+            proposedAt: dateFromFirestore(proposal.proposedAt).toISOString(),
+            proposedAppointmentAt: proposal.proposedAppointmentAt
+              ? dateFromFirestore(proposal.proposedAppointmentAt).toISOString()
+              : null,
+            consultationMode: proposal.consultationMode,
+            fee: proposal.fee,
+            currency: proposal.currency || 'XAF',
+            patientResponse: proposal.patientResponse ?? null,
+            respondedAt: proposal.respondedAt
+              ? dateFromFirestore(proposal.respondedAt).toISOString()
+              : null,
+          } satisfies DoctorProposalListItem;
+        }),
+      )
+    )
+      .filter((item): item is DoctorProposalListItem => item !== null)
+      .filter((item) => !filters.status || item.status === filters.status)
+      .sort(
+        (left, right) =>
+          new Date(right.proposedAt).getTime() -
+          new Date(left.proposedAt).getTime(),
+      );
+
+    const offset = (page - 1) * pageSize;
+    return {
+      items: items.slice(offset, offset + pageSize),
+      counts,
+      page,
+      pageSize,
+      total: items.length,
+      totalPages: Math.ceil(items.length / pageSize),
+    };
+  }
+
+  async cancelProposal(
+    firebaseUser: DecodedIdToken,
+    proposalId: string,
+  ): Promise<{ id: string; status: ProposalStatus }> {
+    const doctor = await this.getVerifiedDoctor(firebaseUser.uid);
+    const proposalRef = this.firebase
+      .getFirestore()
+      .collection('doctorProposals')
+      .doc(proposalId);
+    const snapshot = await proposalRef.get();
+    if (!snapshot.exists) {
+      throw new NotFoundException('Proposal not found');
+    }
+    const proposal = snapshot.data() as DoctorProposal;
+    if (proposal.doctorProfileId !== doctor.id) {
+      throw new NotFoundException('Proposal not found');
+    }
+    if (
+      proposal.status !== ProposalStatus.PENDING &&
+      proposal.status !== ProposalStatus.SENT
+    ) {
+      throw new BadRequestException('This proposal can no longer be cancelled');
+    }
+    await proposalRef.update({
+      status: ProposalStatus.CANCELLED,
+      updatedAt: new Date(),
+    });
+    return { id: proposal.id || snapshot.id, status: ProposalStatus.CANCELLED };
   }
 
   async listMine(firebaseUser: DecodedIdToken): Promise<PatientNeedListItem[]> {

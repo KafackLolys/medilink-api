@@ -366,6 +366,7 @@ export interface Appointment extends Timestamped {
   addressId: string | null;
   cancellationReason: string | null;
   completedAt: Date | null;
+  reason?: string | null;
 }
 
 export interface DoctorWeeklyAvailability extends Timestamped {

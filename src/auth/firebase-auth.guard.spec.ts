@@ -8,15 +8,26 @@ import { FirebaseAuthGuard } from './firebase-auth.guard';
 describe('FirebaseAuthGuard', () => {
   let guard: FirebaseAuthGuard;
   const verifyIdToken = jest.fn();
+  const getUser = jest.fn();
 
   beforeEach(async () => {
     verifyIdToken.mockReset();
+    getUser.mockReset();
+    getUser.mockResolvedValue({
+      exists: true,
+      data: () => ({ status: 'active' }),
+    });
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FirebaseAuthGuard,
         {
           provide: FirebaseService,
-          useValue: { getAuth: () => ({ verifyIdToken }) },
+          useValue: {
+            getAuth: () => ({ verifyIdToken }),
+            getFirestore: () => ({
+              collection: () => ({ doc: () => ({ get: getUser }) }),
+            }),
+          },
         },
       ],
     }).compile();
@@ -57,6 +68,19 @@ describe('FirebaseAuthGuard', () => {
 
     await expect(guard.canActivate(context)).rejects.toThrow(
       UnauthorizedException,
+    );
+  });
+
+  it('rejects suspended application accounts', async () => {
+    verifyIdToken.mockResolvedValue({ uid: 'firebase-user-id' });
+    getUser.mockResolvedValue({
+      exists: true,
+      data: () => ({ status: 'suspended' }),
+    });
+    const { context } = createContext('Bearer valid-token');
+
+    await expect(guard.canActivate(context)).rejects.toThrow(
+      'This account is not active',
     );
   });
 });

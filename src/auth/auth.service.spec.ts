@@ -1,4 +1,7 @@
-import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { FirebaseService } from '../firebase/firebase.service';
 import {
@@ -17,12 +20,19 @@ describe('AuthService', () => {
     get: jest.fn(),
     update: jest.fn(),
   };
+  const doctorProfileRef = {
+    delete: jest.fn(),
+  };
   const patientRef = {
     get: jest.fn(),
   };
   const firestore = {
     collection: jest.fn((name: string) => ({
-      doc: jest.fn(() => (name === 'patients' ? patientRef : userRef)),
+      doc: jest.fn(() => {
+        if (name === 'patients') return patientRef;
+        if (name === 'doctorProfiles') return doctorProfileRef;
+        return userRef;
+      }),
     })),
     runTransaction: jest.fn(
       async (callback: (tx: typeof transaction) => Promise<void>) =>
@@ -147,6 +157,38 @@ describe('AuthService', () => {
     });
   });
 
+  it('creates a pending professional profile when a doctor registers', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        firebaseResponse({
+          localId: 'firebase-uid',
+          idToken: 'firebase-id-token',
+          refreshToken: 'firebase-refresh-token',
+          expiresIn: '3600',
+        }),
+      )
+      .mockResolvedValueOnce(firebaseResponse({ email: 'person@example.com' }));
+
+    await service.register({
+      ...registration,
+      role: AccountRole.DOCTOR,
+      specialty: 'Cardiologie',
+      registrationNumber: 'CM-123',
+    });
+
+    expect(transaction.create).toHaveBeenNthCalledWith(
+      2,
+      doctorProfileRef,
+      expect.objectContaining({
+        id: 'firebase-uid',
+        userId: 'firebase-uid',
+        registrationNumber: 'CM-123',
+        verificationStatus: 'pending',
+        yearsOfExperience: 0,
+      }),
+    );
+  });
+
   it('rejects weak passwords before calling Firebase', async () => {
     await expect(
       service.register({ ...registration, password: 'short' }),
@@ -179,6 +221,32 @@ describe('AuthService', () => {
       refreshToken: 'login-refresh-token',
     });
     expect(userRef.update).toHaveBeenCalled();
+  });
+
+  it('asks users with an unverified email to confirm it before login', async () => {
+    firebaseAuth.verifyIdToken.mockResolvedValue({
+      uid: 'firebase-uid',
+      email: 'person@example.com',
+      email_verified: false,
+    });
+    fetchMock.mockResolvedValueOnce(
+      firebaseResponse({
+        localId: 'firebase-uid',
+        idToken: 'unverified-id-token',
+        refreshToken: 'unverified-refresh-token',
+        expiresIn: '3600',
+      }),
+    );
+
+    await expect(
+      service.login({
+        email: 'person@example.com',
+        password: 'StrongPass123!',
+      }),
+    ).rejects.toThrow(
+      'Votre adresse e-mail n’a pas encore été vérifiée. Consultez votre boîte de réception et cliquez sur le lien de confirmation avant de vous connecter.',
+    );
+    expect(userRef.get).not.toHaveBeenCalled();
   });
 
   it('returns user and default patient profiles when no patient document exists', async () => {

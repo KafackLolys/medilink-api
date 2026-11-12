@@ -112,6 +112,30 @@ on Google Cloud, use the workload's attached service account instead. If only
 some `FIREBASE_*` service-account values are set, startup fails with a
 configuration error rather than passing incomplete credentials to Firebase.
 
+### Administrator accounts
+
+The first administrator must be provisioned once in Firebase Console because
+public registration intentionally accepts only patient and doctor roles:
+
+1. Create the account under **Authentication → Users** and verify its email.
+2. Copy its Firebase UID and create `users/{uid}` in Firestore with the account
+   fields used by the application, including `id: {uid}`, `role: "admin"`,
+   `status: "active"`, `firstName`, `lastName`, `email`,
+   `emailVerified: true`, `phone: null`, `phoneVerified: false`,
+   `specialty: null`, `registrationNumber: null`, `lastLoginAt: null`,
+   `createdAt`, and `updatedAt`.
+3. Sign in through the application; the administrator dashboard is available
+   at `/admin`.
+
+An active administrator can then create additional administrator accounts
+from the dashboard. These accounts are created as email-verified because they
+are provisioned by an existing administrator; their initial credentials
+should be delivered through a secure channel. The dashboard can list and
+search patient and doctor accounts, change account status, change patient
+email verification, and set a doctor's professional verification status.
+Suspended and deleted accounts are disabled in Firebase Authentication,
+existing refresh tokens are revoked, and protected API requests reject them.
+
 ### Supabase Storage for medical attachments
 
 Create a **private** Storage bucket in Supabase (the local configuration uses
@@ -139,6 +163,40 @@ description and consultation mode), `PATCH /needs/:id/close`, and
 `DELETE /needs/:id` (drafts only). All routes verify the Firebase ID token and
 the request owner. Detail responses include short-lived signed URLs for that
 patient's private attachments.
+
+### Internal notifications and FCM push
+
+The notification API stores user-owned history in `notifications` and separate
+per-installation FCM subscriptions in `notificationDevices`. Authenticated
+clients can page through notifications, mark one or all as read, register a
+device, and remove only their own device. `deviceId` is installation-specific;
+the same endpoints accept both `web` and `mobile`, so a later mobile client can
+share the backend without sharing a browser token. A token registered to a new
+account is detached from the previous account.
+
+The API persists a notification before attempting FCM delivery. FCM failures
+are logged without undoing a successfully completed business action, and
+expired device tokens are removed. Proposal and appointment events currently
+create internal notifications and push alerts. Messages can use the same
+`NotificationsService.publish` event path when a real messaging endpoint is
+added.
+
+For web push, configure the Firebase Web App values and its **Cloud Messaging
+VAPID key** in the Next.js environment (these are public client configuration,
+not service-account credentials):
+
+```dotenv
+NEXT_PUBLIC_FIREBASE_API_KEY=your-web-api-key
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=your-project-id
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your-sender-id
+NEXT_PUBLIC_FIREBASE_APP_ID=your-web-app-id
+NEXT_PUBLIC_FIREBASE_VAPID_KEY=your-cloud-messaging-vapid-key
+```
+
+In Firebase Console, enable Cloud Messaging for the same project. Users enable
+push explicitly from the notifications tab; browsers require HTTPS except
+localhost. FCM tokens are never returned by notification list endpoints.
 
 ### Frontend CORS
 

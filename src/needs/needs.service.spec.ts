@@ -5,9 +5,12 @@ import {
 import {
   AccountRole,
   ConsultationMode,
+  DoctorVerificationStatus,
+  NeedPriority,
   NeedStatus,
 } from '../interfaces/database';
 import { FirebaseService } from '../firebase/firebase.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { NeedsService } from './needs.service';
 
 describe('NeedsService', () => {
@@ -17,14 +20,55 @@ describe('NeedsService', () => {
     set: jest.fn(),
     update: jest.fn(),
   };
+  let doctorVerificationStatus = DoctorVerificationStatus.VERIFIED;
+  let doctorNeedDocuments: Array<Record<string, unknown>> = [];
+  let doctorProposalDocuments: Array<{
+    id: string;
+    data: () => Record<string, unknown>;
+  }> = [];
   const firestore = {
     collection: jest.fn((name: string) => {
       if (name === 'users') {
         return {
-          doc: () => ({
+          doc: (uid: string) => ({
             get: async () => ({
               exists: true,
-              data: () => ({ role: AccountRole.PATIENT }),
+              data: () => ({
+                role:
+                  uid === 'doctor-uid' || uid === 'doctor-owner-uid'
+                    ? AccountRole.DOCTOR
+                    : AccountRole.PATIENT,
+              }),
+            }),
+          }),
+        };
+      }
+      if (name === 'doctorProfiles') {
+        return {
+          where: () => ({
+            limit: () => ({
+              get: async () => ({
+                docs: [
+                  {
+                    id: 'doctor-profile',
+                    data: () => ({
+                      verificationStatus: doctorVerificationStatus,
+                    }),
+                  },
+                ],
+              }),
+            }),
+          }),
+        };
+      }
+      if (name === 'medicalNeeds') {
+        return {
+          doc: () => needRef,
+          where: () => ({
+            get: async () => ({
+              docs: doctorNeedDocuments.map((need) => ({
+                data: () => need,
+              })),
             }),
           }),
         };
@@ -38,7 +82,13 @@ describe('NeedsService', () => {
       }
       if (name === 'doctorProposals') {
         return {
-          where: () => ({ get: async () => ({ size: 2 }) }),
+          doc: () => needRef,
+          where: () => ({
+            get: async () => ({
+              size: doctorProposalDocuments.length || 2,
+              docs: doctorProposalDocuments,
+            }),
+          }),
         };
       }
       return { doc: () => needRef };
@@ -52,6 +102,9 @@ describe('NeedsService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    doctorVerificationStatus = DoctorVerificationStatus.VERIFIED;
+    doctorNeedDocuments = [];
+    doctorProposalDocuments = [];
     process.env.SUPABASE_URL = 'https://project.supabase.co';
     process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
     process.env.SUPABASE_STORAGE_BUCKET = 'medical-files';
@@ -60,7 +113,9 @@ describe('NeedsService', () => {
     );
     service = new NeedsService({
       getFirestore: () => firestore,
-    } as unknown as FirebaseService);
+    } as unknown as FirebaseService, {
+      publish: jest.fn().mockResolvedValue(undefined),
+    } as unknown as NotificationsService);
   });
 
   afterAll(() => {
@@ -178,7 +233,6 @@ describe('NeedsService', () => {
       exists: true,
       data: () => existingNeed,
     });
-
     await expect(
       service.getMine({ uid: 'patient-uid' } as never, 'need-123'),
     ).resolves.toMatchObject({
@@ -197,6 +251,82 @@ describe('NeedsService', () => {
     await expect(
       service.getMine({ uid: 'another-patient' } as never, 'need-123'),
     ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('lists the doctor’s patient needs through their proposals with server pagination', async () => {
+    const proposedAt = new Date('2026-11-11T10:00:00.000Z');
+    const appointmentAt = new Date('2026-11-13T10:00:00.000Z');
+    needRef.get.mockResolvedValue({
+      exists: true,
+      data: () => existingNeed,
+    });
+    doctorProposalDocuments = [
+      {
+        id: 'proposal-1',
+        data: () => ({
+          id: 'proposal-1',
+          needId: 'need-123',
+          doctorProfileId: 'doctor-profile',
+          status: 'pending',
+          message: 'Je peux vous accompagner.',
+          proposedAt,
+          proposedAppointmentAt: appointmentAt,
+          consultationMode: ConsultationMode.HOME,
+          fee: 10000,
+          currency: 'XAF',
+          patientResponse: null,
+          respondedAt: null,
+        }),
+      },
+    ];
+
+    const result = await service.listProposalsForDoctor(
+      { uid: 'doctor-uid' } as never,
+      { page: '1', pageSize: '1' },
+    );
+
+    expect(result).toMatchObject({
+      page: 1,
+      pageSize: 1,
+      total: 1,
+      totalPages: 1,
+      counts: { pending: 1 },
+      items: [
+        {
+          id: 'proposal-1',
+          needId: 'need-123',
+          needTitle: existingNeed.title,
+          specialty: existingNeed.specialty,
+          city: existingNeed.city,
+          district: existingNeed.district,
+          status: 'pending',
+          proposedAt: proposedAt.toISOString(),
+          proposedAppointmentAt: appointmentAt.toISOString(),
+          consultationMode: 'home',
+          fee: 10000,
+        },
+      ],
+    });
+    expect(result.items[0]).not.toHaveProperty('patientName');
+  });
+
+  it('cancels only the doctor’s own pending proposal', async () => {
+    needRef.get.mockResolvedValue({
+      exists: true,
+      id: 'proposal-1',
+      data: () => ({
+        id: 'proposal-1',
+        doctorProfileId: 'doctor-profile',
+        status: 'pending',
+      }),
+    });
+
+    await expect(
+      service.cancelProposal({ uid: 'doctor-uid' } as never, 'proposal-1'),
+    ).resolves.toEqual({ id: 'proposal-1', status: 'cancelled' });
+    expect(needRef.update).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'cancelled' }),
+    );
   });
 
   it('updates editable request details and returns the refreshed profile', async () => {
@@ -239,5 +369,51 @@ describe('NeedsService', () => {
       specialty: 'Cardiologie',
       mode: 'teleconsultation',
     });
+  });
+
+  it('filters doctor requests and paginates the filtered results', async () => {
+    doctorNeedDocuments = [
+      existingNeed,
+      {
+        ...existingNeed,
+        id: 'need-older',
+        title: 'Migraines persistantes',
+        publishedAt: new Date('2026-11-10T00:00:00.000Z'),
+      },
+      {
+        ...existingNeed,
+        id: 'other-doctor-owned-need',
+        ownerUserId: 'doctor-owner-uid',
+      },
+    ];
+
+    await expect(
+      service.listForDoctor(
+        { uid: 'doctor-uid' } as never,
+        {
+          q: 'Yaoundé',
+          specialty: 'Neurologie',
+          priority: NeedPriority.ROUTINE,
+          mode: ConsultationMode.HOME,
+          page: '2',
+          pageSize: '1',
+        },
+      ),
+    ).resolves.toMatchObject({
+      items: [{ id: 'need-older' }],
+      specialties: ['Neurologie'],
+      page: 2,
+      pageSize: 1,
+      total: 2,
+      totalPages: 2,
+    });
+  });
+
+  it('denies access to doctors whose profile is not verified', async () => {
+    doctorVerificationStatus = DoctorVerificationStatus.PENDING;
+
+    await expect(
+      service.listForDoctor({ uid: 'doctor-uid' } as never, {}),
+    ).rejects.toThrow(ForbiddenException);
   });
 });

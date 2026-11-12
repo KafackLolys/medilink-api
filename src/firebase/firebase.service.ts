@@ -8,11 +8,13 @@ import {
 } from 'firebase-admin/app';
 import { getAuth, type Auth } from 'firebase-admin/auth';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
+import { getMessaging, type Messaging } from 'firebase-admin/messaging';
 
 @Injectable()
 export class FirebaseService {
   private readonly db: Firestore;
   private readonly auth: Auth;
+  private readonly messaging: Messaging;
   private readonly app: App;
 
   constructor() {
@@ -21,6 +23,7 @@ export class FirebaseService {
 
     this.db = getFirestore(this.app);
     this.auth = getAuth(this.app);
+    this.messaging = getMessaging(this.app);
   }
 
   private getCredential() {
@@ -50,5 +53,9 @@ export class FirebaseService {
 
   getAuth(): Auth {
     return this.auth;
+  }
+
+  getMessaging(): Messaging {
+    return this.messaging;
   }
 }

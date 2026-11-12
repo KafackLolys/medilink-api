@@ -21,6 +21,7 @@ import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
 import {
   NeedsService,
   type CreateProposalRequest,
+  type DoctorProposalFilters,
   type DoctorNeedFilters,
   type UploadedNeedFile,
 } from './needs.service';
@@ -46,6 +47,17 @@ export class NeedsController {
     return this.needsService.listForDoctor(request.firebaseUser, filters);
   }
 
+  @Get('doctor/proposals')
+  listDoctorProposals(
+    @Req() request: AuthenticatedRequest,
+    @Query() filters: DoctorProposalFilters,
+  ) {
+    return this.needsService.listProposalsForDoctor(
+      request.firebaseUser,
+      filters,
+    );
+  }
+
   @Get('doctor/:id')
   getForDoctor(
     @Req() request: AuthenticatedRequest,
@@ -66,6 +78,15 @@ export class NeedsController {
       id,
       body,
     );
+  }
+
+  @Patch('doctor/proposals/:id/cancel')
+  @HttpCode(HttpStatus.OK)
+  cancelDoctorProposal(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
+    return this.needsService.cancelProposal(request.firebaseUser, id);
   }
 
   @Get(':id')

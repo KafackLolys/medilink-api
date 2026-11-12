@@ -2,6 +2,7 @@ import {
   BadGatewayException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -13,7 +14,9 @@ import {
   AccountRole,
   AccountStatus,
   BloodType,
+  DoctorVerificationStatus,
   Gender,
+  type DoctorProfile,
   type PatientProfile,
   type User,
 } from '../interfaces/database';
@@ -156,6 +159,7 @@ export class AuthService {
 
     const firestore = this.firebase.getFirestore();
     const userRef = firestore.collection('users').doc(uid);
+    const doctorProfileRef = firestore.collection('doctorProfiles').doc(uid);
     const now = new Date();
     const user: User = {
       id: uid,
@@ -192,7 +196,35 @@ export class AuthService {
             'This Firebase account is already registered',
           );
         }
+        const existingDoctorProfile =
+          request.role === AccountRole.DOCTOR
+            ? await transaction.get(doctorProfileRef)
+            : null;
+        if (existingDoctorProfile?.exists) {
+          throw new ConflictException(
+            'A professional profile already exists for this account',
+          );
+        }
         transaction.create(userRef, user);
+        if (request.role === AccountRole.DOCTOR) {
+          const doctorProfile: DoctorProfile = {
+            id: uid,
+            userId: uid,
+            fullName: `${firstName} ${lastName}`.trim(),
+            registrationNumber: user.registrationNumber ?? '',
+            bio: '',
+            yearsOfExperience: 0,
+            consultationFee: 0,
+            currency: 'XAF',
+            defaultAppointmentDurationMinutes: 30,
+            professionalAddress: null,
+            verificationStatus: DoctorVerificationStatus.PENDING,
+            verifiedAt: null,
+            createdAt: now,
+            updatedAt: now,
+          };
+          transaction.create(doctorProfileRef, doctorProfile);
+        }
       });
       profileCreated = true;
 
@@ -204,7 +236,12 @@ export class AuthService {
       if (!(error instanceof ConflictException)) {
         try {
           if (profileCreated) {
-            await userRef.delete();
+            await Promise.all([
+              userRef.delete(),
+              request.role === AccountRole.DOCTOR
+                ? doctorProfileRef.delete()
+                : Promise.resolve(),
+            ]);
           }
           await this.firebase.getAuth().deleteUser(uid);
         } catch (cleanupError) {
@@ -245,7 +282,14 @@ export class AuthService {
     );
     const identity = this.readTokens(response);
     const decoded = await this.verifyToken(identity.idToken);
+    if (!decoded.email_verified) {
+      throw new ForbiddenException(
+        'Votre adresse e-mail n’a pas encore été vérifiée. Consultez votre boîte de réception et cliquez sur le lien de confirmation avant de vous connecter.',
+      );
+    }
+
     const user = await this.getStoredUser(decoded.uid);
+    this.assertAccountCanSignIn(user);
     const updates: Partial<User> = {
       lastLoginAt: new Date(),
       updatedAt: new Date(),
@@ -283,6 +327,7 @@ export class AuthService {
     const identity = this.readTokens(response);
     const decoded = await this.verifyToken(identity.idToken);
     const user = await this.getStoredUser(decoded.uid);
+    this.assertAccountCanSignIn(user);
 
     return {
       user: this.toProfile(user),
@@ -357,6 +402,15 @@ export class AuthService {
       throw new NotFoundException('Application account not found');
     }
     return snapshot.data() as User;
+  }
+
+  private assertAccountCanSignIn(user: User): void {
+    if (
+      user.status === AccountStatus.SUSPENDED ||
+      user.status === AccountStatus.DELETED
+    ) {
+      throw new ForbiddenException('This account is not active');
+    }
   }
 
   private async verifyToken(idToken: string): Promise<DecodedIdToken> {
