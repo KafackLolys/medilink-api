@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module';
 import { FirebaseModule } from './firebase/firebase.module';
 import { NeedsModule } from './needs/needs.module';
 import { AppointmentsModule } from './appointments/appointments.module';
+import { AvailabilitiesModule } from './availabilities/availabilities.module';
 import { DoctorsModule } from './doctors/doctors.module';
 import { AdminModule } from './admin/admin.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -31,6 +32,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     NeedsModule,
     DoctorsModule,
     AppointmentsModule,
+    AvailabilitiesModule,
     AdminModule,
     NotificationsModule,
     MessagesModule,

@@ -17,6 +17,7 @@ import {
   type Appointment,
   type DoctorConsultationMode,
   type DoctorProfile,
+  type PatientProfile,
   type DoctorWeeklyAvailability,
   type User,
 } from '../interfaces/database';
@@ -68,6 +69,16 @@ function localDateParts(date: Date, timeZone: string) {
   } catch {
     throw new BadRequestException('timeZone must be a valid IANA time zone');
   }
+}
+
+function asLocalDateString(value: Date | Timestamp): string {
+  const date = value instanceof Timestamp ? value.toDate() : value;
+  return date.toISOString().slice(0, 10);
+}
+
+function asLocalTimeString(value: Date | Timestamp): string {
+  const date = value instanceof Timestamp ? value.toDate() : value;
+  return date.toISOString().slice(11, 16);
 }
 
 @Injectable()
@@ -344,4 +355,158 @@ export class AppointmentsService {
     if (!appointment) throw new NotFoundException('Appointment not found');
     return appointment;
   }
+
+  private async resolveDoctorProfileId(uid: string): Promise<string> {
+    const firestore = this.firebase.getFirestore();
+    const userSnapshot = await firestore.collection('users').doc(uid).get();
+    if (!userSnapshot.exists) {
+      throw new NotFoundException('Compte utilisateur introuvable');
+    }
+    const user = userSnapshot.data() as User;
+    if (
+      user.role !== AccountRole.DOCTOR ||
+      user.status === AccountStatus.SUSPENDED ||
+      user.status === AccountStatus.DELETED
+    ) {
+      throw new NotFoundException('Profil médecin introuvable');
+    }
+
+    const doctorSnapshot = await firestore
+      .collection('doctorProfiles')
+      .where('userId', '==', uid)
+      .limit(1)
+      .get();
+    const doctorDocument = doctorSnapshot.docs[0];
+    if (!doctorDocument) {
+      throw new NotFoundException('Profil médecin introuvable');
+    }
+    return doctorDocument.id;
+  }
+
+  async listDoctor(firebaseUser: DecodedIdToken): Promise<DoctorAppointmentView[]> {
+    const doctorProfileId = await this.resolveDoctorProfileId(firebaseUser.uid);
+    const firestore = this.firebase.getFirestore();
+    const snapshot = await firestore
+      .collection('appointments')
+      .where('doctorProfileId', '==', doctorProfileId)
+      .get();
+
+    const views: DoctorAppointmentView[] = [];
+    for (const document of snapshot.docs) {
+      const data = document.data() as Appointment & { reason?: string | null };
+      const scheduledAt =
+        data.scheduledAt instanceof Timestamp
+          ? data.scheduledAt.toDate()
+          : data.scheduledAt;
+
+      let patient = 'Patient';
+      let district: string | null = null;
+      let mode = 'À domicile';
+
+      try {
+        const patientSnapshot = await firestore
+          .collection('patientProfiles')
+          .doc(data.patientProfileId)
+          .get();
+        if (patientSnapshot.exists) {
+          const patientProfile = patientSnapshot.data() as PatientProfile;
+          const userSnapshot = await firestore
+            .collection('users')
+            .doc(patientProfile.userId ?? data.patientProfileId)
+            .get();
+          if (userSnapshot.exists) {
+            const user = userSnapshot.data() as User;
+            patient = `${user.firstName} ${user.lastName}`.trim() || patient;
+          }
+          if (data.addressId) {
+            const addressSnapshot = await firestore
+              .collection('addresses')
+              .doc(data.addressId)
+              .get();
+            if (addressSnapshot.exists) {
+              district =
+                (addressSnapshot.data() as { district?: string }).district ?? null;
+            }
+          }
+        }
+      } catch {
+        // Ignorer les erreurs de chargement patient.
+      }
+
+      switch (data.consultationMode) {
+        case ConsultationMode.TELECONSULTATION:
+          mode = 'Téléconsultation';
+          break;
+        case ConsultationMode.HOME:
+        default:
+          mode = 'À domicile';
+      }
+
+      views.push({
+        id: document.id,
+        date: asLocalDateString(scheduledAt),
+        time: asLocalTimeString(scheduledAt),
+        patient,
+        district,
+        mode,
+        status: data.status,
+      });
+    }
+
+    views.sort(
+      (left, right) =>
+        new Date(`${left.date}T${left.time}`).getTime() -
+        new Date(`${right.date}T${right.time}`).getTime(),
+    );
+
+    return views;
+  }
+
+  async updateStatus(
+    firebaseUser: DecodedIdToken,
+    id: string,
+    status: AppointmentStatus,
+  ): Promise<{ id: string; status: AppointmentStatus }> {
+    const doctorProfileId = await this.resolveDoctorProfileId(firebaseUser.uid);
+    const firestore = this.firebase.getFirestore();
+
+    const appointmentRef = firestore.collection('appointments').doc(id);
+    const appointmentSnapshot = await appointmentRef.get();
+    if (!appointmentSnapshot.exists) {
+      throw new NotFoundException('Rendez-vous introuvable');
+    }
+    const appointment = appointmentSnapshot.data() as Appointment;
+    if (appointment.doctorProfileId !== doctorProfileId) {
+      throw new ForbiddenException('Ce rendez-vous ne vous appartient pas.');
+    }
+
+    await appointmentRef.update({
+      status,
+      updatedAt: new Date(),
+    });
+
+    try {
+      await this.notifications.publish({
+        userId: appointment.patientProfileId,
+        type: NotificationType.APPOINTMENT_UPDATED,
+        title: 'Votre rendez-vous a été mis à jour',
+        body: `Le statut de votre rendez-vous est passé à "${status}".`,
+        targetUrl: '/patient/rendez-vous',
+      });
+    } catch {
+      // Ne pas faire échouer la mise à jour si la notification échoue.
+    }
+
+    return { id, status };
+  }
+}
+
+export interface DoctorAppointmentView {
+  id: string;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:mm
+  patient: string;
+  district: string | null;
+  mode: string;
+  status: AppointmentStatus;
 }

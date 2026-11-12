@@ -1,3 +1,9 @@
+/**
+ * Structure de la base de données pour l'application Medilink.
+ * N.B: toujours utiliser des enums en anglais
+ */
+
+
 export enum UserRole {
   PATIENT = "patient",
   DOCTOR = "doctor",
