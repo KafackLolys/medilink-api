@@ -228,6 +228,9 @@ export interface District extends Timestamped {
   /** Foreign key to City.id. */
   cityId: string;
   name: string;
+  /** Optional public approximate district center; NEVER a patient's address. */
+  centerLatitude?: number | null;
+  centerLongitude?: number | null;
 }
 
 export interface Address extends Timestamped {

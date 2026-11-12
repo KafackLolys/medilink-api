@@ -117,6 +117,24 @@ export class AvailabilitiesService {
     return doctorDocument.id;
   }
 
+  async getDuration(uid: string): Promise<{ durationMinutes: number }> {
+    const doctorProfileId = await this.resolveDoctorProfileId(uid);
+    const snapshot = await this.firebase.getFirestore().collection('doctorProfiles').doc(doctorProfileId).get();
+    const durationMinutes = (snapshot.data() as { defaultAppointmentDurationMinutes?: number } | undefined)?.defaultAppointmentDurationMinutes ?? 30;
+    return { durationMinutes };
+  }
+
+  async setDuration(uid: string, durationMinutes: number): Promise<{ durationMinutes: number }> {
+    if (!Number.isInteger(durationMinutes) || ![15, 20, 30, 45, 60].includes(durationMinutes)) {
+      throw new BadRequestException('Durée de consultation invalide');
+    }
+    const doctorProfileId = await this.resolveDoctorProfileId(uid);
+    await this.firebase.getFirestore().collection('doctorProfiles').doc(doctorProfileId).update({
+      defaultAppointmentDurationMinutes: durationMinutes, updatedAt: new Date(),
+    });
+    return { durationMinutes };
+  }
+
   async getWeekly(uid: string): Promise<WeeklyAvailabilityOutput[]> {
     const doctorProfileId = await this.resolveDoctorProfileId(uid);
     const firestore = this.firebase.getFirestore();

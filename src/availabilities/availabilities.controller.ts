@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Put,
   Req,
@@ -21,6 +22,16 @@ import {
 @UseGuards(FirebaseAuthGuard)
 export class AvailabilitiesController {
   constructor(private readonly availabilities: AvailabilitiesService) {}
+
+  @Get('me/duration')
+  getDuration(@Req() request: AuthenticatedRequest) {
+    return this.availabilities.getDuration(request.firebaseUser.uid);
+  }
+
+  @Patch('me/duration')
+  setDuration(@Req() request: AuthenticatedRequest, @Body() body: { durationMinutes: number }) {
+    return this.availabilities.setDuration(request.firebaseUser.uid, body?.durationMinutes);
+  }
 
   @Get('me/weekly')
   getWeekly(@Req() request: AuthenticatedRequest) {

@@ -134,6 +134,7 @@ export interface DoctorNeedListItem {
   publishedAt: string;
   availableFrom: string | null;
   documentsCount: number;
+  publicLocation?: { latitude: number; longitude: number } | null;
 }
 
 export interface PaginatedDoctorNeeds {
@@ -288,7 +289,23 @@ export class NeedsService {
           dateFromFirestore(left.publishedAt ?? left.createdAt).getTime(),
       );
     const offset = (page - 1) * pageSize;
-    const items = filtered.slice(offset, offset + pageSize).map((need) => ({
+    const pageNeeds = filtered.slice(offset, offset + pageSize);
+    const [districtSnapshot, citySnapshot] = await Promise.all([
+      firestore.collection('districts').get(), firestore.collection('cities').get(),
+    ]);
+    const cities = new Map(citySnapshot.docs.map(doc => [doc.id, doc.data().name?.trim().toLowerCase()]));
+    const centers = new Map<string, { latitude: number; longitude: number }>();
+    for (const doc of districtSnapshot.docs) {
+      const area = doc.data();
+      const city = cities.get(area.cityId);
+      const lat = area.centerLatitude;
+      const lon = area.centerLongitude;
+      if (city && typeof area.name === 'string' && typeof lat === 'number' && typeof lon === 'number' &&
+          Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+        centers.set(`${city}::${area.name.trim().toLowerCase()}`, { latitude: lat, longitude: lon });
+      }
+    }
+    const items = pageNeeds.map((need) => ({
       id: need.id,
       title: need.title,
       summary: need.description,
@@ -304,6 +321,7 @@ export class NeedsService {
         ? dateFromFirestore(need.availableFrom).toISOString()
         : null,
       documentsCount: need.attachments?.length ?? 0,
+      publicLocation: centers.get(`${need.city.trim().toLowerCase()}::${need.district.trim().toLowerCase()}`) ?? null,
     }));
 
     return {

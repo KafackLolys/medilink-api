@@ -153,7 +153,8 @@ export class PatientsService {
       await this.uploadFile(storageKey, file);
       downloadUrl = await this.createSignedUrl(storageKey);
     } catch (storageError) {
-      this.logger.warn('Storage upload unavailable, proceeding with database record', storageError);
+      this.logger.error('Patient document storage failed', storageError);
+      throw new ServiceUnavailableException('Impossible de stocker le document médical. Réessayez.');
     }
 
     const now = new Date();
@@ -204,7 +205,8 @@ export class PatientsService {
       try {
         await this.deleteStorageObject(document.storageKey);
       } catch (storageError) {
-        this.logger.warn(`Could not delete storage object for ${documentId}`, storageError);
+        this.logger.error(`Could not delete storage object for ${documentId}`, storageError);
+        throw new ServiceUnavailableException('La suppression du fichier a échoué. Réessayez.');
       }
     }
 
