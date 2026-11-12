@@ -346,6 +346,59 @@ export class AppointmentsService {
       );
   }
 
+  async getMyReview(uid: string, appointmentId: string) {
+    const db = this.firebase.getFirestore();
+    const appointment = await db.collection('appointments').doc(appointmentId).get();
+    const patient = await db.collection('patients').doc(uid).get();
+    const patientProfileId = (patient.data()?.id as string | undefined) ?? uid;
+    if (!appointment.exists || appointment.data()?.patientProfileId !== patientProfileId) {
+      throw new NotFoundException('Appointment not found');
+    }
+    const existing = await db.collection('reviews').doc(appointmentId).get();
+    if (!existing.exists) return null;
+    const review = existing.data();
+    if (review?.patientProfileId !== patientProfileId) {
+      throw new NotFoundException('Review not found');
+    }
+    return {id: existing.id, rating: Number(review.rating), comment: review.comment ?? null};
+  }
+
+  async submitReview(uid: string, appointmentId: string, body: {
+    rating: number; comment?: string | null;
+  }) {
+    if (!body || !Number.isInteger(body.rating) || body.rating < 1 || body.rating > 5 ||
+      (body.comment !== undefined && body.comment !== null &&
+        (typeof body.comment !== 'string' || body.comment.length > 2000))) {
+      throw new BadRequestException('Note ou commentaire invalide');
+    }
+    const db = this.firebase.getFirestore();
+    const appointmentRef = db.collection('appointments').doc(appointmentId);
+    const reviewRef = db.collection('reviews').doc(appointmentId);
+    const patientSnapshot = await db.collection('patients').doc(uid).get();
+    const patientProfileId = (patientSnapshot.data()?.id as string | undefined) ?? uid;
+    await db.runTransaction(async transaction => {
+      const [appointmentSnapshot, previousReview] = await Promise.all([
+        transaction.get(appointmentRef), transaction.get(reviewRef),
+      ]);
+      if (!appointmentSnapshot.exists || appointmentSnapshot.data()?.patientProfileId !== patientProfileId) {
+        throw new NotFoundException('Appointment not found');
+      }
+      const appointment = appointmentSnapshot.data() as Appointment;
+      if (appointment.status !== AppointmentStatus.COMPLETED) {
+        throw new BadRequestException('Seule une consultation terminée peut être évaluée');
+      }
+      if (previousReview.exists) throw new BadRequestException('Un avis existe déjà pour ce rendez-vous');
+      const now = new Date();
+      transaction.create(reviewRef, {
+        id: appointmentId, appointmentId, patientProfileId,
+        doctorProfileId: appointment.doctorProfileId,
+        rating: body.rating, comment: body.comment?.trim() || null,
+        createdAt: now, updatedAt: now,
+      });
+    });
+    return {id: appointmentId, rating: body.rating, comment: body.comment?.trim() || null};
+  }
+
   async getMine(
     firebaseUser: DecodedIdToken,
     id: string,

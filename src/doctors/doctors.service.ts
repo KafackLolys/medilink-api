@@ -317,6 +317,68 @@ export class DoctorsService {
     };
   }
 
+  async listMyReviews(uid: string) {
+    const { doctorProfileId } = await this.getDoctorProfileId(uid);
+    const snapshot = await this.firebase.getFirestore().collection('reviews')
+      .where('doctorProfileId', '==', doctorProfileId).get();
+    const distribution: Record<1 | 2 | 3 | 4 | 5, number> = {1:0,2:0,3:0,4:0,5:0};
+    const items = snapshot.docs.flatMap(document => {
+      const review = document.data();
+      const rating = Number(review.rating);
+      if (!Number.isInteger(rating) || rating < 1 || rating > 5) return [];
+      const created = review.createdAt as Date | { toDate?: () => Date } | null;
+      const date = created instanceof Date ? created : created?.toDate?.() ?? null;
+      if (!date) return [];
+      distribution[rating as 1 | 2 | 3 | 4 | 5] += 1;
+      return [{
+        id: document.id,
+        appointmentId: String(review.appointmentId ?? ''),
+        rating,
+        comment: typeof review.comment === 'string' ? review.comment : null,
+        createdAt: date.toISOString(),
+        patientLabel: 'Patient', // Minimise l'exposition de l'identité dans les avis
+      }];
+    }).sort((a,b) => b.createdAt.localeCompare(a.createdAt));
+    const total = items.length;
+    return {items, total, distribution,
+      rating: total ? items.reduce((sum, item) => sum + item.rating, 0) / total : null};
+  }
+
+  async updateMyProfile(uid: string, body: {
+    bio?: string; yearsOfExperience?: number;
+    consultationFee?: number; professionalAddress?: string | null;
+  }): Promise<DoctorOwnProfile> {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new BadRequestException('Un objet de mise à jour est requis');
+    }
+    const allowed = ['bio','yearsOfExperience','consultationFee','professionalAddress'];
+    if (Object.keys(body).some(key => !allowed.includes(key))) {
+      throw new BadRequestException('Champ non modifiable');
+    }
+    const updates: Record<string, unknown> = {};
+    if (body.bio !== undefined) {
+      if (typeof body.bio !== 'string' || body.bio.length > 600) throw new BadRequestException('Présentation invalide (600 caractères max)');
+      updates.bio = body.bio.trim();
+    }
+    if (body.yearsOfExperience !== undefined) {
+      if (!Number.isInteger(body.yearsOfExperience) || body.yearsOfExperience < 0 || body.yearsOfExperience > 80) throw new BadRequestException('Expérience invalide');
+      updates.yearsOfExperience = body.yearsOfExperience;
+    }
+    if (body.consultationFee !== undefined) {
+      if (!Number.isSafeInteger(body.consultationFee) || body.consultationFee < 0 || body.consultationFee > 100000000) throw new BadRequestException('Tarif invalide');
+      updates.consultationFee = body.consultationFee;
+    }
+    if (body.professionalAddress !== undefined) {
+      if (body.professionalAddress !== null && (typeof body.professionalAddress !== 'string' || body.professionalAddress.length > 255)) throw new BadRequestException('Adresse invalide');
+      updates.professionalAddress = body.professionalAddress?.trim() || null;
+    }
+    if (Object.keys(updates).length === 0) throw new BadRequestException('Aucune modification');
+    const { doctorProfileId } = await this.getDoctorProfileId(uid);
+    await this.firebase.getFirestore().collection('doctorProfiles').doc(doctorProfileId)
+      .update({...updates, updatedAt: new Date()});
+    return this.getMine(uid);
+  }
+
   async uploadMyDocument(
     uid: string,
     type: string,

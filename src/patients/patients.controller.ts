@@ -28,6 +28,11 @@ const MAX_DOCUMENT_SIZE = 10 * 1024 * 1024;
 export class PatientsController {
   constructor(private readonly patientsService: PatientsService) {}
 
+  @Get('me/conditions')
+  listMyConditions(@Req() request: AuthenticatedRequest) {
+    return this.patientsService.listMyConditions(request.firebaseUser.uid);
+  }
+
   @Get('me/documents')
   listMyDocuments(@Req() request: AuthenticatedRequest) {
     return this.patientsService.listMyDocuments(request.firebaseUser.uid);

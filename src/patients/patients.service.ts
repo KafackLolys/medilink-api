@@ -55,6 +55,36 @@ export class PatientsService {
 
   constructor(private readonly firebase: FirebaseService) {}
 
+  async listMyConditions(uid: string): Promise<Array<{
+    id: string; name: string; description: string | null;
+    status: string; diagnosedAt: string | null; notes: string | null;
+  }>> {
+    const db = this.firebase.getFirestore();
+    const userSnapshot = await db.collection('users').doc(uid).get();
+    if (!userSnapshot.exists || userSnapshot.data()?.role !== 'patient') {
+      throw new NotFoundException('Patient profile not found');
+    }
+    const patientSnapshot = await db.collection('patients').doc(uid).get();
+    const patientProfileId = (patientSnapshot.data()?.id as string | undefined) ?? uid;
+    const links = await db.collection('patientConditions')
+      .where('patientProfileId', '==', patientProfileId).get();
+    return Promise.all(links.docs.map(async link => {
+      const entry = link.data();
+      const condition = await db.collection('medicalConditions')
+        .doc(entry.medicalConditionId as string).get();
+      const date = entry.diagnosedAt as {toDate?: () => Date} | Date | null | undefined;
+      const parsed = date instanceof Date ? date : date?.toDate?.() ?? null;
+      return {
+        id: link.id,
+        name: String(condition.data()?.name ?? 'Condition non renseignée'),
+        description: condition.data()?.description ?? null,
+        status: String(entry.status ?? 'active'),
+        diagnosedAt: parsed?.toISOString() ?? null,
+        notes: entry.notes ?? null,
+      };
+    }));
+  }
+
   async listMyDocuments(uid: string): Promise<PatientDocumentResponse[]> {
     const firestore = this.firebase.getFirestore();
     const snapshot = await firestore

@@ -8,6 +8,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Patch,
   Query,
   Req,
   UploadedFile,
@@ -38,6 +39,20 @@ export class DoctorsController {
   @Get('me')
   getMine(@Req() request: AuthenticatedRequest) {
     return this.doctorsService.getMine(request.firebaseUser.uid);
+  }
+
+  @Get('me/reviews')
+  listMyReviews(@Req() request: AuthenticatedRequest) {
+    return this.doctorsService.listMyReviews(request.firebaseUser.uid);
+  }
+
+  @Patch('me')
+  updateMyProfile(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: { bio?: string; yearsOfExperience?: number;
+      consultationFee?: number; professionalAddress?: string | null },
+  ) {
+    return this.doctorsService.updateMyProfile(request.firebaseUser.uid, body);
   }
 
   @Post('me/documents')

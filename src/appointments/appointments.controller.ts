@@ -34,6 +34,20 @@ export class AppointmentsController {
     return this.appointmentsService.listDoctor(request.firebaseUser);
   }
 
+  @Get(':id/review')
+  getMyReview(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
+    return this.appointmentsService.getMyReview(request.firebaseUser.uid, id);
+  }
+
+  @Post(':id/review')
+  submitReview(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: {rating: number; comment?: string | null},
+  ) {
+    return this.appointmentsService.submitReview(request.firebaseUser.uid, id, body);
+  }
+
   @Get(':id')
   getMine(
     @Req() request: AuthenticatedRequest,
