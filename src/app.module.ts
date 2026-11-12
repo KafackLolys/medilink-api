@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { IntegrationModule } from './integration/integration.module';
 import { ConfigModule } from '@nestjs/config';
 import { createObserveModule } from '@nestjs/observe';
 import { AppController } from './app.controller';
@@ -37,6 +38,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     NotificationsModule,
     MessagesModule,
     PatientsModule,
+    IntegrationModule,
   ],
   controllers: [AppController],
   providers: [AppService],
