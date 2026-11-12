@@ -11,6 +11,7 @@ import { DoctorsModule } from './doctors/doctors.module';
 import { AdminModule } from './admin/admin.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { MessagesModule } from './messages/messages.module';
+import { PatientsModule } from './patients/patients.module';
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
@@ -33,6 +34,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     AdminModule,
     NotificationsModule,
     MessagesModule,
+    PatientsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
