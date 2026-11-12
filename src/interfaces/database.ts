@@ -404,6 +404,8 @@ export interface Message {
   conversationId: string;
   /** Foreign key to User.id. */
   senderUserId: string;
+  /** Foreign key to the message recipient. */
+  receiverUserId: string;
   body: string;
   sentAt: Date;
   readAt: Date | null;

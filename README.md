@@ -176,10 +176,21 @@ account is detached from the previous account.
 
 The API persists a notification before attempting FCM delivery. FCM failures
 are logged without undoing a successfully completed business action, and
-expired device tokens are removed. Proposal and appointment events currently
-create internal notifications and push alerts. Messages can use the same
-`NotificationsService.publish` event path when a real messaging endpoint is
-added.
+expired device tokens are removed. Proposal, appointment, and new-message
+events create internal notifications and push alerts.
+
+### Patient-doctor messaging
+
+Authenticated patients and verified doctors can list conversations with
+`GET /messages/conversations`, read a conversation with
+`GET /messages/conversations/:id`, and send a message with
+`POST /messages/conversations/:id` and `{ "body": "..." }`. Conversations are
+available only where the patient and doctor have an active or accepted
+proposal (`sent`, `pending`, or `accepted`). Messages are stored in the
+`conversations/{conversationId}/messages` subcollection; polling clients
+receive new messages and the API marks received messages as read. New messages
+create an internal notification and a generic push alert for the recipient.
+The API accepts plain-text message bodies up to 4,000 characters.
 
 For web push, configure the Firebase Web App values and its **Cloud Messaging
 VAPID key** in the Next.js environment (these are public client configuration,

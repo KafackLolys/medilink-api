@@ -28,7 +28,13 @@ describe('DoctorsService', () => {
   let profileExists = true;
   let migratedProfile: Record<string, unknown> | null = null;
   const transactionCreate = jest.fn();
+  const transactionDelete = jest.fn();
+  const transactionUpdate = jest.fn();
   const legacyProfileRef = { id: 'doctor-uid' };
+  const originalFetch = globalThis.fetch;
+  const originalSupabaseUrl = process.env.SUPABASE_URL;
+  const originalServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const originalBucket = process.env.SUPABASE_STORAGE_BUCKET;
   const firestore = {
     collection: jest.fn((name: string) => {
       if (name === 'users') {
@@ -43,7 +49,7 @@ describe('DoctorsService', () => {
       }
       if (name === 'doctorProfiles') {
         return {
-          doc: () => legacyProfileRef,
+          doc: (id: string) => ({ ...legacyProfileRef, id }),
           where: () => ({
             limit: () => ({
               get: async () => ({
@@ -96,6 +102,20 @@ describe('DoctorsService', () => {
       }
       if (name === 'doctorVerificationDocuments') {
         return {
+          doc: (id: string) => ({
+            id,
+            get: async () => ({
+              exists: id === 'verification-1',
+              data: () => ({
+                doctorProfileId: 'doctor-profile',
+                documentId: 'medical-document-1',
+                status: 'approved',
+                reviewedAt: null,
+                reviewerUserId: null,
+                rejectionReason: null,
+              }),
+            }),
+          }),
           where: () => ({
             get: async () => ({
               docs: [
@@ -113,13 +133,17 @@ describe('DoctorsService', () => {
       }
       if (name === 'medicalDocuments') {
         return {
-          doc: () => ({
+          doc: (id: string) => ({
+            id,
             get: async () => ({
-              exists: true,
+              exists: id === 'medical-document-1',
               data: () => ({
+                id,
+                ownerUserId: 'doctor-uid',
                 type: 'medical_license',
                 fileName: 'license.pdf',
                 storageKey: 'private/should-not-be-returned',
+                sizeBytes: 2048,
               }),
             }),
           }),
@@ -154,28 +178,125 @@ describe('DoctorsService', () => {
     }),
     runTransaction: async (
       callback: (transaction: {
-        get: () => Promise<{ exists: boolean; data: () => Record<string, unknown> }>;
+        get: (ref?: { id?: string }) => Promise<{
+          exists: boolean;
+          data: () => Record<string, unknown>;
+        }>;
         create: typeof transactionCreate;
+        delete: typeof transactionDelete;
+        update: typeof transactionUpdate;
       }) => Promise<unknown>,
     ) =>
       callback({
-        get: async () => ({
-          exists: migratedProfile !== null,
-          data: () => migratedProfile ?? {},
-        }),
+        get: async (ref) => {
+          if (ref?.id === 'verification-1') {
+            return {
+              exists: true,
+              data: () => ({
+                doctorProfileId: 'doctor-profile',
+                documentId: 'medical-document-1',
+                status: 'approved',
+              }),
+            };
+          }
+          if (ref?.id === 'medical-document-1') {
+            return {
+              exists: true,
+              data: () => ({
+                ownerUserId: 'doctor-uid',
+                storageKey: 'private/should-not-be-returned',
+              }),
+            };
+          }
+          return {
+            exists: ref?.id === 'doctor-profile' || migratedProfile !== null,
+            data: () => migratedProfile ?? {},
+          };
+        },
         create: transactionCreate,
+        delete: transactionDelete,
+        update: transactionUpdate,
       }),
   };
   let service: DoctorsService;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    process.env.SUPABASE_URL = 'https://project.supabase.co';
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
+    process.env.SUPABASE_STORAGE_BUCKET = 'medical-files';
+    globalThis.fetch = jest.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ signedURL: '/object/sign/medical-files/document?token=test' }), {
+        status: 200,
+      }),
+    );
     doctorAccountStatus = AccountStatus.ACTIVE;
     profileExists = true;
     migratedProfile = null;
     service = new DoctorsService({
       getFirestore: () => firestore,
     } as unknown as FirebaseService);
+  });
+
+  it('uploads a private verification document and creates a temporary consultation link', async () => {
+    const fileBytes = Buffer.from('%PDF-1.7 test document');
+    const result = await service.uploadMyDocument(
+      'doctor-uid',
+      'medical_degree',
+      {
+        originalname: 'diplome.pdf',
+        mimetype: 'application/pdf',
+        size: fileBytes.length,
+        buffer: fileBytes,
+      },
+    );
+
+    expect(result).toMatchObject({
+      name: 'medical_degree',
+      filename: 'diplome.pdf',
+      status: 'pending',
+      sizeBytes: fileBytes.length,
+      downloadUrl: expect.stringContaining('/storage/v1/object/sign/'),
+    });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(
+      1,
+      expect.stringMatching(/\/storage\/v1\/object\/medical-files\/doctor-verification\/doctor-uid\/doctor-profile\//),
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(transactionCreate).toHaveBeenCalledTimes(2);
+  });
+
+  it('deletes only an owned document and resets verification when an approved file is removed', async () => {
+    await expect(
+      service.deleteMyDocument('doctor-uid', 'verification-1'),
+    ).resolves.toBeUndefined();
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://project.supabase.co/storage/v1/object/medical-files',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+    expect(transactionDelete).toHaveBeenCalledTimes(2);
+    expect(transactionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'doctor-profile' }),
+      expect.objectContaining({
+        verificationStatus: DoctorVerificationStatus.PENDING,
+        verifiedAt: null,
+      }),
+    );
+  });
+
+  afterAll(() => {
+    globalThis.fetch = originalFetch;
+    if (originalSupabaseUrl === undefined) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = originalSupabaseUrl;
+    if (originalServiceRoleKey === undefined) {
+      delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    } else {
+      process.env.SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey;
+    }
+    if (originalBucket === undefined) delete process.env.SUPABASE_STORAGE_BUCKET;
+    else process.env.SUPABASE_STORAGE_BUCKET = originalBucket;
   });
 
   it('loads the signed-in doctor profile and associated professional details', async () => {
@@ -193,9 +314,13 @@ describe('DoctorsService', () => {
       documents: [
         {
           id: 'verification-1',
+          medicalDocumentId: 'medical-document-1',
           name: 'medical_license',
           filename: 'license.pdf',
           status: 'approved',
+          sizeBytes: 2048,
+          downloadUrl:
+            'https://project.supabase.co/storage/v1/object/sign/medical-files/document?token=test',
         },
       ],
       rating: 4.5,

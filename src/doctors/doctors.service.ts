@@ -1,8 +1,11 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import type {
   DoctorQualification,
   DoctorSpecialty,
@@ -17,6 +20,8 @@ import {
   AccountStatus,
   AppointmentStatus,
   DoctorVerificationStatus,
+  MedicalDocumentType,
+  VerificationDocumentStatus,
   type DoctorVerificationDocument,
   type Specialty,
 } from '../interfaces/database';
@@ -50,17 +55,68 @@ export interface DoctorOwnProfile extends DoctorDirectoryItem {
   secondarySpecialties: string[];
   degrees: string[];
   verificationStatus: DoctorVerificationStatus;
-  documents: Array<{
-    id: string;
-    name: string;
-    filename: string;
-    status: string;
-  }>;
+  documents: DoctorVerificationDocumentView[];
   completedConsultations: number;
+}
+
+export interface DoctorVerificationDocumentView {
+  id: string;
+  medicalDocumentId: string;
+  name: ProfessionalDocumentType;
+  filename: string;
+  status: VerificationDocumentStatus;
+  sizeBytes: number;
+  downloadUrl: string | null;
+}
+
+export interface UploadedDoctorDocument {
+  originalname: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;
+}
+
+export type ProfessionalDocumentType =
+  | MedicalDocumentType.MEDICAL_LICENSE
+  | MedicalDocumentType.MEDICAL_DEGREE
+  | MedicalDocumentType.IDENTITY_DOCUMENT
+  | MedicalDocumentType.OTHER;
+
+const MAX_DOCUMENT_SIZE = 10 * 1024 * 1024;
+const ALLOWED_DOCUMENT_TYPES = new Set<string>([
+  MedicalDocumentType.MEDICAL_LICENSE,
+  MedicalDocumentType.MEDICAL_DEGREE,
+  MedicalDocumentType.IDENTITY_DOCUMENT,
+  MedicalDocumentType.OTHER,
+]);
+const ALLOWED_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
+const MAX_DOCUMENTS = 50;
+
+interface SupabaseStorageConfig {
+  url: string;
+  serviceRoleKey: string;
+  bucket: string;
+}
+
+function encodeStoragePath(path: string): string {
+  return path.split('/').map(encodeURIComponent).join('/');
+}
+
+function isProfessionalDocumentType(
+  value: string,
+): value is ProfessionalDocumentType {
+  return ALLOWED_DOCUMENT_TYPES.has(value);
 }
 
 @Injectable()
 export class DoctorsService {
+  private readonly logger = new Logger(DoctorsService.name);
+
   constructor(private readonly firebase: FirebaseService) {}
 
   async getMine(uid: string): Promise<DoctorOwnProfile> {
@@ -192,11 +248,17 @@ export class DoctorsService {
           .get();
         if (!medicalDocumentSnapshot.exists) return null;
         const medicalDocument = medicalDocumentSnapshot.data() as MedicalDocument;
+        if (!isProfessionalDocumentType(medicalDocument.type)) return null;
         return {
           id: document.id,
+          medicalDocumentId,
           name: medicalDocument.type,
           filename: medicalDocument.fileName,
           status: verification.status,
+          sizeBytes: medicalDocument.sizeBytes ?? 0,
+          downloadUrl: medicalDocument.storageKey
+            ? await this.createSignedUrl(medicalDocument.storageKey)
+            : null,
         };
       }),
     );
@@ -253,6 +315,160 @@ export class DoctorsService {
           appointment.data().status === AppointmentStatus.COMPLETED,
       ).length,
     };
+  }
+
+  async uploadMyDocument(
+    uid: string,
+    type: string,
+    file: UploadedDoctorDocument,
+  ): Promise<DoctorOwnProfile['documents'][number]> {
+    if (!isProfessionalDocumentType(type)) {
+      throw new BadRequestException('Document type is invalid');
+    }
+    if (
+      !file ||
+      !Buffer.isBuffer(file.buffer) ||
+      file.size <= 0 ||
+      file.size > MAX_DOCUMENT_SIZE ||
+      file.buffer.length !== file.size
+    ) {
+      throw new BadRequestException('Document must be between 1 byte and 10 MB');
+    }
+    if (!ALLOWED_MIME_TYPES.has(file.mimetype) || !this.hasValidSignature(file)) {
+      throw new BadRequestException('Document content is not a supported file type');
+    }
+
+    const firestore = this.firebase.getFirestore();
+    const { doctorProfileId } = await this.getDoctorProfileId(uid);
+    const existingDocuments = await firestore
+      .collection('doctorVerificationDocuments')
+      .where('doctorProfileId', '==', doctorProfileId)
+      .get();
+    if (existingDocuments.size >= MAX_DOCUMENTS) {
+      throw new BadRequestException(`No more than ${MAX_DOCUMENTS} documents can be stored`);
+    }
+
+    const documentId = randomUUID();
+    const storageKey = `doctor-verification/${uid}/${doctorProfileId}/${documentId}`;
+    await this.uploadFile(storageKey, file);
+    const now = new Date();
+    const medicalDocument: MedicalDocument = {
+      id: documentId,
+      ownerUserId: uid,
+      type,
+      fileName: file.originalname.slice(0, 255),
+      storageKey,
+      mimeType: file.mimetype,
+      sizeBytes: file.size,
+      uploadedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const verificationDocument: DoctorVerificationDocument = {
+      doctorProfileId,
+      documentId,
+      status: VerificationDocumentStatus.PENDING,
+      reviewedAt: null,
+      reviewerUserId: null,
+      rejectionReason: null,
+    };
+
+    let downloadUrl: string;
+    try {
+      downloadUrl = await this.createSignedUrl(storageKey);
+      await firestore.runTransaction(async (transaction) => {
+        transaction.create(
+          firestore.collection('medicalDocuments').doc(documentId),
+          medicalDocument,
+        );
+        transaction.create(
+          firestore.collection('doctorVerificationDocuments').doc(documentId),
+          verificationDocument,
+        );
+      });
+    } catch (error) {
+      try {
+        await this.deleteStorageObject(storageKey);
+      } catch (cleanupError) {
+        this.logger.error(
+          'Failed to remove a doctor document after metadata persistence failed',
+          cleanupError instanceof Error ? cleanupError.stack : undefined,
+        );
+      }
+      throw error;
+    }
+
+    return {
+      id: documentId,
+      medicalDocumentId: documentId,
+      name: type,
+      filename: medicalDocument.fileName,
+      status: verificationDocument.status,
+      sizeBytes: medicalDocument.sizeBytes,
+      downloadUrl,
+    };
+  }
+
+  async deleteMyDocument(uid: string, id: string): Promise<void> {
+    const firestore = this.firebase.getFirestore();
+    const { doctorProfileId } = await this.getDoctorProfileId(uid);
+    const verificationRef = firestore
+      .collection('doctorVerificationDocuments')
+      .doc(id);
+    const verificationSnapshot = await verificationRef.get();
+    if (!verificationSnapshot.exists) {
+      throw new NotFoundException('Doctor document not found');
+    }
+    const verification =
+      verificationSnapshot.data() as DoctorVerificationDocument;
+    const medicalDocumentId = verification.documentId || id;
+    const medicalDocumentRef = firestore
+      .collection('medicalDocuments')
+      .doc(medicalDocumentId);
+    const medicalDocumentSnapshot = await medicalDocumentRef.get();
+    if (!medicalDocumentSnapshot.exists) {
+      throw new NotFoundException('Doctor document not found');
+    }
+    const medicalDocument = medicalDocumentSnapshot.data() as MedicalDocument;
+    if (
+      verification.doctorProfileId !== doctorProfileId ||
+      verification.documentId !== id ||
+      medicalDocument.ownerUserId !== uid
+    ) {
+      throw new NotFoundException('Doctor document not found');
+    }
+
+    await this.deleteStorageObject(medicalDocument.storageKey);
+    const profileRef = firestore.collection('doctorProfiles').doc(doctorProfileId);
+    await firestore.runTransaction(async (transaction) => {
+      const currentVerification = await transaction.get(verificationRef);
+      const currentDocument = await transaction.get(medicalDocumentRef);
+      const currentProfile = await transaction.get(profileRef);
+      if (!currentVerification.exists || !currentDocument.exists) {
+        throw new NotFoundException('Doctor document not found');
+      }
+      const currentData =
+        currentVerification.data() as DoctorVerificationDocument;
+      const currentMedicalDocument = currentDocument.data() as MedicalDocument;
+      if (
+        currentData.doctorProfileId !== doctorProfileId ||
+        currentMedicalDocument.ownerUserId !== uid
+      ) {
+        throw new NotFoundException('Doctor document not found');
+      }
+      transaction.delete(verificationRef);
+      transaction.delete(medicalDocumentRef);
+      if (
+        currentData.status === VerificationDocumentStatus.APPROVED &&
+        currentProfile.exists
+      ) {
+        transaction.update(profileRef, {
+          verificationStatus: DoctorVerificationStatus.PENDING,
+          verifiedAt: null,
+          updatedAt: new Date(),
+        });
+      }
+    });
   }
 
   async list(filters: DoctorDirectoryFilters): Promise<{
@@ -371,5 +587,139 @@ export class DoctorsService {
     const doctor = result.doctors.find((item) => item.id === id);
     if (!doctor) throw new NotFoundException('Verified doctor not found');
     return doctor;
+  }
+
+  private async getDoctorProfileId(uid: string): Promise<{ doctorProfileId: string }> {
+    const firestore = this.firebase.getFirestore();
+    const userSnapshot = await firestore.collection('users').doc(uid).get();
+    if (
+      !userSnapshot.exists ||
+      (userSnapshot.data() as User).role !== AccountRole.DOCTOR ||
+      [AccountStatus.SUSPENDED, AccountStatus.DELETED].includes(
+        (userSnapshot.data() as User).status,
+      )
+    ) {
+      throw new NotFoundException('Doctor profile not found');
+    }
+
+    const profileSnapshot = await firestore
+      .collection('doctorProfiles')
+      .where('userId', '==', uid)
+      .limit(1)
+      .get();
+    const profile = profileSnapshot.docs[0];
+    if (!profile) throw new NotFoundException('Doctor profile not found');
+    return { doctorProfileId: profile.id };
+  }
+
+  private getStorageConfig(): SupabaseStorageConfig {
+    const url = process.env.SUPABASE_URL?.replace(/\/+$/, '');
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const bucket = process.env.SUPABASE_STORAGE_BUCKET;
+    if (!url || !serviceRoleKey || !bucket) {
+      throw new ServiceUnavailableException(
+        'SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and SUPABASE_STORAGE_BUCKET must be configured',
+      );
+    }
+    return { url, serviceRoleKey, bucket };
+  }
+
+  private async uploadFile(
+    path: string,
+    file: UploadedDoctorDocument,
+  ): Promise<void> {
+    const config = this.getStorageConfig();
+    const body = new ArrayBuffer(file.buffer.byteLength);
+    new Uint8Array(body).set(file.buffer);
+    const response = await fetch(
+      `${config.url}/storage/v1/object/${encodeURIComponent(config.bucket)}/${encodeStoragePath(path)}`,
+      {
+        method: 'POST',
+        headers: {
+          apikey: config.serviceRoleKey,
+          Authorization: `Bearer ${config.serviceRoleKey}`,
+          'Content-Type': file.mimetype,
+          'x-upsert': 'false',
+        },
+        body,
+      },
+    );
+    if (!response.ok) {
+      throw new ServiceUnavailableException(
+        `Supabase Storage upload failed (${response.status})`,
+      );
+    }
+  }
+
+  private async createSignedUrl(path: string): Promise<string> {
+    const config = this.getStorageConfig();
+    const response = await fetch(
+      `${config.url}/storage/v1/object/sign/${encodeURIComponent(config.bucket)}/${encodeStoragePath(path)}`,
+      {
+        method: 'POST',
+        headers: {
+          apikey: config.serviceRoleKey,
+          Authorization: `Bearer ${config.serviceRoleKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ expiresIn: 900 }),
+      },
+    );
+    if (!response.ok) {
+      throw new ServiceUnavailableException(
+        `Supabase Storage signed URL request failed (${response.status})`,
+      );
+    }
+    const payload = (await response.json()) as { signedURL?: string };
+    if (!payload.signedURL) {
+      throw new ServiceUnavailableException(
+        'Supabase Storage returned no signed URL',
+      );
+    }
+    return payload.signedURL.startsWith('http')
+      ? payload.signedURL
+      : `${config.url}/storage/v1${payload.signedURL.startsWith('/') ? '' : '/'}${payload.signedURL}`;
+  }
+
+  private async deleteStorageObject(path: string): Promise<void> {
+    const config = this.getStorageConfig();
+    const response = await fetch(
+      `${config.url}/storage/v1/object/${encodeURIComponent(config.bucket)}`,
+      {
+        method: 'DELETE',
+        headers: {
+          apikey: config.serviceRoleKey,
+          Authorization: `Bearer ${config.serviceRoleKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ prefixes: [path] }),
+      },
+    );
+    if (!response.ok) {
+      throw new ServiceUnavailableException(
+        `Supabase Storage delete failed (${response.status})`,
+      );
+    }
+  }
+
+  private hasValidSignature(file: UploadedDoctorDocument): boolean {
+    const bytes = file.buffer;
+    switch (file.mimetype) {
+      case 'application/pdf':
+        return bytes.subarray(0, 5).toString() === '%PDF-';
+      case 'image/jpeg':
+        return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+      case 'image/png':
+        return bytes.subarray(0, 8).equals(
+          Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        );
+      case 'image/webp':
+        return (
+          bytes.subarray(0, 4).toString() === 'RIFF' &&
+          bytes.subarray(8, 12).toString() === 'WEBP'
+        );
+      default:
+        return false;
+    }
   }
 }
