@@ -26,6 +26,7 @@ import {
   type Specialty,
 } from '../interfaces/database';
 import { FirebaseService } from '../firebase/firebase.service';
+import { matchesDoctorSearch } from './doctor-search';
 
 export interface DoctorDirectoryFilters {
   q?: string;
@@ -42,6 +43,8 @@ export interface DoctorDirectoryItem {
   consultationFee: number;
   currency: string;
   professionalAddress: string | null;
+  serviceCity?: string | null;
+  serviceDistricts?: string[];
   modes: DoctorConsultationMode['mode'][];
   availability: DoctorWeeklyAvailability[];
   rating: number | null;
@@ -559,9 +562,9 @@ export class DoctorsService {
           .get();
         if (!userSnapshot.exists) return null;
         const user = userSnapshot.data() as User;
-        if (user.status !== AccountStatus.ACTIVE) return null;
+        if (user.role !== AccountRole.DOCTOR || user.status !== AccountStatus.ACTIVE) return null;
 
-        const [modesSnapshot, availabilitySnapshot, reviewsSnapshot] =
+        const [modesSnapshot, availabilitySnapshot, reviewsSnapshot, zoneSnapshot] =
           await Promise.all([
             this.firebase
               .getFirestore()
@@ -578,7 +581,21 @@ export class DoctorsService {
               .collection('reviews')
               .where('doctorProfileId', '==', document.id)
               .get(),
+            // This is the collection written by /integration/doctor/zone.
+            // Its document ID is the Firebase user UID (not doctorProfileId).
+            this.firebase
+              .getFirestore()
+              .collection('doctorServiceAreaSettings')
+              .doc(profile.userId)
+              .get(),
           ]);
+        const zone = zoneSnapshot.exists ? zoneSnapshot.data() : undefined;
+        const serviceCity = typeof zone?.city === 'string' ? zone.city.trim() : null;
+        const serviceDistricts: string[] = Array.isArray(zone?.districts)
+          ? zone.districts.filter((district: unknown): district is string =>
+              typeof district === 'string' && district.trim().length > 0,
+            ).map((district: string) => district.trim())
+          : [];
         const ratings = reviewsSnapshot.docs
           .map((review) => Number(review.data().rating))
           .filter((rating) => Number.isFinite(rating) && rating >= 1 && rating <= 5);
@@ -596,6 +613,8 @@ export class DoctorsService {
           consultationFee: profile.consultationFee ?? 0,
           currency: profile.currency || 'XAF',
           professionalAddress: profile.professionalAddress ?? null,
+          serviceCity,
+          serviceDistricts,
           modes: modesSnapshot.docs
             .map((mode) => (mode.data() as DoctorConsultationMode).mode)
             .filter(Boolean),
@@ -613,22 +632,11 @@ export class DoctorsService {
 
     const doctors = profiles
       .filter((doctor): doctor is DoctorDirectoryItem => doctor !== null)
-      .filter(
-        (doctor) =>
-          !specialtyFilter ||
-          doctor.specialty.toLocaleLowerCase().includes(specialtyFilter),
-      )
-      .filter(
-        (doctor) =>
-          !cityFilter ||
-          doctor.professionalAddress?.toLocaleLowerCase().includes(cityFilter),
-      )
-      .filter(
-        (doctor) =>
-          !query ||
-          [doctor.name, doctor.specialty, doctor.professionalAddress ?? '']
-            .some((value) => value.toLocaleLowerCase().includes(query)),
-      )
+      .filter((doctor) => matchesDoctorSearch(doctor, {
+        q: query,
+        specialty: specialtyFilter,
+        city: cityFilter,
+      }))
       .sort((left, right) => left.name.localeCompare(right.name, 'fr'));
 
     return {

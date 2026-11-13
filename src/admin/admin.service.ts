@@ -239,14 +239,21 @@ export class AdminService {
     }
     const verificationStatus =
       request.verificationStatus as DoctorVerificationStatus;
-    await doctorDocument.ref.update({
+    const now = new Date();
+    const batch = firestore.batch();
+    batch.update(doctorDocument.ref, {
       verificationStatus,
-      verifiedAt:
-        verificationStatus === DoctorVerificationStatus.VERIFIED
-          ? new Date()
-          : null,
-      updatedAt: new Date(),
+      verifiedAt: verificationStatus === DoctorVerificationStatus.VERIFIED ? now : null,
+      updatedAt: now,
     });
+    // A doctor signs up with users.status=pending. Approval should also
+    // activate that account, otherwise the directory excludes the doctor.
+    // Never automatically reactivate suspended/deleted accounts.
+    if (verificationStatus === DoctorVerificationStatus.VERIFIED &&
+        user.status === AccountStatus.PENDING) {
+      batch.update(userRef, { status: AccountStatus.ACTIVE, updatedAt: now });
+    }
+    await batch.commit();
     return { id, verificationStatus };
   }
 
