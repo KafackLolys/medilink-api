@@ -269,6 +269,95 @@ export class AuthService {
     };
   }
 
+  /** Google OAuth: identify an existing account without assigning any role from client input. */
+  async googleStatus(rawToken: unknown): Promise<
+    { registered: false } | { registered: true; user: AuthProfile }
+  > {
+    const identity = await this.verifyGoogleIdentity(rawToken);
+    const userRef = this.firebase.getFirestore().collection('users').doc(identity.uid);
+    const snapshot = await userRef.get();
+    if (!snapshot.exists) {
+      await this.assertNoOtherEmailAccount(identity.uid, identity.email!);
+      return { registered: false };
+    }
+    const user = snapshot.data() as User;
+    this.assertAccountCanSignIn(user);
+    if (user.email!.toLowerCase() !== identity.email!.toLowerCase()) {
+      throw new ConflictException('Ce compte possède une autre adresse e-mail. Contactez le support.');
+    }
+    await userRef.update({ lastLoginAt: new Date(), emailVerified: true, updatedAt: new Date() });
+    return { registered: true, user: this.toProfile({ ...user, emailVerified: true }) };
+  }
+
+  /** New Google identities may choose only patient or doctor; admin never. */
+  async googleComplete(rawToken: unknown, role: unknown): Promise<{ user: AuthProfile }> {
+    const identity = await this.verifyGoogleIdentity(rawToken);
+    if (role !== AccountRole.PATIENT && role !== AccountRole.DOCTOR) {
+      throw new BadRequestException('Choisissez le profil Patient ou Médecin.');
+    }
+    const db = this.firebase.getFirestore();
+    const ref = db.collection('users').doc(identity.uid);
+    const doctorRef = db.collection('doctorProfiles').doc(identity.uid);
+    const email = identity.email!.trim().toLowerCase();
+    await this.assertNoOtherEmailAccount(identity.uid, email);
+    const firebaseUser = await this.firebase.getAuth().getUser(identity.uid);
+    const parts = (firebaseUser.displayName ?? '').trim().split(/\s+/).filter(Boolean);
+    const firstName = parts[0]?.slice(0, 80) || 'Utilisateur';
+    const lastName = parts.slice(1).join(' ').slice(0, 80);
+    const now = new Date();
+    const user: User = {
+      id: identity.uid, firstName, lastName, role, email,
+      phone: firebaseUser.phoneNumber ?? '',
+      specialty: null, registrationNumber: null,
+      status: role === AccountRole.DOCTOR ? AccountStatus.PENDING : AccountStatus.ACTIVE,
+      emailVerified: true, phoneVerified: Boolean(firebaseUser.phoneNumber),
+      lastLoginAt: now, createdAt: now, updatedAt: now,
+    };
+    await db.runTransaction(async tx => {
+      const [existing, doctorProfile] = await Promise.all([
+        tx.get(ref), role === AccountRole.DOCTOR ? tx.get(doctorRef) : Promise.resolve(null),
+      ]);
+      if (existing.exists) {
+        throw new ConflictException('Ce compte est déjà inscrit. Reconnectez-vous avec Google.');
+      }
+      if (doctorProfile?.exists) throw new ConflictException('Un profil médecin existe déjà.');
+      tx.create(ref, user);
+      if (role === AccountRole.DOCTOR) {
+        const profile: DoctorProfile = {
+          id: identity.uid, userId: identity.uid,
+          fullName: `${firstName} ${lastName}`.trim(),
+          registrationNumber: '', bio: '', yearsOfExperience: 0,
+          consultationFee: 0, currency: 'XAF', defaultAppointmentDurationMinutes: 30,
+          professionalAddress: null,
+          verificationStatus: DoctorVerificationStatus.PENDING, verifiedAt: null,
+          createdAt: now, updatedAt: now,
+        };
+        tx.create(doctorRef, profile);
+      }
+    });
+    return { user: this.toProfile(user) };
+  }
+
+  private async verifyGoogleIdentity(rawToken: unknown): Promise<DecodedIdToken> {
+    if (typeof rawToken !== 'string' || !rawToken || rawToken.length > 10000) {
+      throw new BadRequestException('Jeton Google Firebase requis');
+    }
+    const decoded = await this.verifyToken(rawToken);
+    if (decoded.firebase?.sign_in_provider !== 'google.com' ||
+        !decoded.email || decoded.email_verified !== true) {
+      throw new ForbiddenException('Connectez-vous avec un compte Google dont l’e-mail est vérifié.');
+    }
+    return decoded;
+  }
+
+  private async assertNoOtherEmailAccount(uid: string, email: string): Promise<void> {
+    const snapshot = await this.firebase.getFirestore().collection('users')
+      .where('email', '==', email).get();
+    if (snapshot.docs.some(doc => doc.id !== uid)) {
+      throw new ConflictException('Un compte MediLink existe déjà avec cet e-mail. Connectez-vous avec votre méthode habituelle avant de lier Google.');
+    }
+  }
+
   async login(request: LoginRequest): Promise<AuthSession> {
     if (!request || typeof request !== 'object' || Array.isArray(request)) {
       throw new BadRequestException('A login object is required');

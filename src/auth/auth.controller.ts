@@ -24,6 +24,21 @@ import { FirebaseAuthGuard } from './firebase-auth.guard';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  // Google sign-in is authenticated by verifying the Firebase ID token inside the service.
+  // These endpoints must not use FirebaseAuthGuard because an unregistered Google UID
+  // intentionally has no Firestore users document yet.
+  @Post('google/status')
+  @HttpCode(HttpStatus.OK)
+  googleStatus(@Body() body: { idToken?: unknown }) {
+    return this.authService.googleStatus(body?.idToken);
+  }
+
+  @Post('google/complete')
+  @HttpCode(HttpStatus.OK)
+  googleComplete(@Body() body: { idToken?: unknown; role?: unknown }) {
+    return this.authService.googleComplete(body?.idToken, body?.role);
+  }
+
   @Post('register')
   register(@Body() body: RegisterUserRequest) {
     return this.authService.register(body);
