@@ -801,9 +801,14 @@ export class NeedsService {
           doctorUser.role !== AccountRole.DOCTOR || doctorUser.status !== AccountStatus.ACTIVE) {
         throw new BadRequestException('Doctor is not available for appointments');
       }
-      if (need.consultationMode !== proposal.consultationMode ||
-          !modesSnapshot.docs.some((doc) => doc.data().mode === proposal.consultationMode)) {
-        throw new BadRequestException('This consultation mode is not available');
+      // The patient explicitly accepts the proposal's consultation mode, which
+      // may differ from the initially requested mode. Only the doctor's actual
+      // configured modes can authorize an appointment.
+      if (![ConsultationMode.HOME, ConsultationMode.TELECONSULTATION].includes(proposal.consultationMode)) {
+        throw new BadRequestException('Invalid consultation mode in proposal');
+      }
+      if (!modesSnapshot.docs.some((doc) => doc.data().mode === proposal.consultationMode)) {
+        throw new BadRequestException('The doctor has not activated the proposed consultation mode');
       }
       if (!proposal.proposedAppointmentAt) throw new BadRequestException('The proposed appointment date is missing');
       const startsAt = dateFromFirestore(proposal.proposedAppointmentAt);
@@ -864,7 +869,7 @@ export class NeedsService {
           });
         }
       }
-      tx.update(needRef, { status: NeedStatus.APPOINTMENT_CONFIRMED, updatedAt: now });
+      tx.update(needRef, { status: NeedStatus.APPOINTMENT_CONFIRMED, consultationMode: proposal.consultationMode, updatedAt: now });
       tx.create(appointmentRef, {
         id: appointmentRef.id,
         patientProfileId: patientSnapshot.exists ? (patientSnapshot.data()?.id ?? firebaseUser.uid) : firebaseUser.uid,
