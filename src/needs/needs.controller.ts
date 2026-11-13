@@ -89,6 +89,20 @@ export class NeedsController {
     return this.needsService.cancelProposal(request.firebaseUser, id);
   }
 
+  @Get(':id/proposals')
+  patientProposals(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
+    return this.needsService.listPatientProposals(request.firebaseUser, id);
+  }
+
+  @Patch(':id/proposals/:proposalId/accept')
+  acceptPatientProposal(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Param('proposalId') proposalId: string,
+  ) {
+    return this.needsService.acceptPatientProposal(request.firebaseUser, id, proposalId);
+  }
+
   @Get(':id')
   get(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
     return this.needsService.getMine(request.firebaseUser, id);

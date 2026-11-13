@@ -9,9 +9,11 @@ import {
 } from '@nestjs/common';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import { Timestamp } from 'firebase-admin/firestore';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   AccountRole,
+  AccountStatus,
+  AppointmentStatus,
   ConsultationMode,
   DoctorVerificationStatus,
   type MedicalNeed,
@@ -82,6 +84,19 @@ export interface PatientNeedListItem {
   mode: 'domicile' | 'teleconsultation';
   status: NeedStatus;
   attachmentsCount: number;
+}
+
+export interface PatientProposalView {
+  id: string;
+  status: ProposalStatus;
+  doctor: { id: string; name: string; specialty: string };
+  conversationId: string;
+  message: string;
+  proposedAt: string;
+  proposedAppointmentAt: string | null;
+  consultationMode: ConsultationMode;
+  fee: number;
+  currency: string;
 }
 
 export interface PatientNeedDetail extends PatientNeedListItem {
@@ -682,6 +697,196 @@ export class NeedsService {
           };
         }),
     );
+  }
+
+  async listPatientProposals(
+    firebaseUser: DecodedIdToken,
+    needId: string,
+  ): Promise<{ items: PatientProposalView[] }> {
+    const firestore = this.firebase.getFirestore();
+    const needSnapshot = await firestore.collection('medicalNeeds').doc(needId).get();
+    if (!needSnapshot.exists) throw new NotFoundException('Medical need not found');
+    this.assertOwner(needSnapshot.data() as MedicalNeed, firebaseUser.uid);
+    const snapshot = await firestore.collection('doctorProposals').where('needId', '==', needId).get();
+    const items = await Promise.all(snapshot.docs.map(async (document) => {
+      const proposal = document.data() as DoctorProposal;
+      const doctorSnapshot = await firestore.collection('doctorProfiles').doc(proposal.doctorProfileId).get();
+      if (!doctorSnapshot.exists) return null;
+      const doctor = doctorSnapshot.data() as DoctorProfile;
+      if (doctor.verificationStatus !== DoctorVerificationStatus.VERIFIED) return null;
+      const userSnapshot = await firestore.collection('users').doc(doctor.userId).get();
+      if (!userSnapshot.exists) return null;
+      const user = userSnapshot.data() as User;
+      if (user.role !== AccountRole.DOCTOR) return null;
+      return {
+        id: proposal.id || document.id,
+        status: proposal.status,
+        doctor: {
+          id: doctorSnapshot.id,
+          name: doctor.fullName?.trim() || `${user.firstName} ${user.lastName}`.trim(),
+          specialty: user.specialty?.trim() || 'Médecine générale',
+        },
+        conversationId: createHash('sha256')
+          .update(`${firebaseUser.uid}:${doctorSnapshot.id}`).digest('hex'),
+        message: proposal.message,
+        proposedAt: dateFromFirestore(proposal.proposedAt).toISOString(),
+        proposedAppointmentAt: proposal.proposedAppointmentAt
+          ? dateFromFirestore(proposal.proposedAppointmentAt).toISOString() : null,
+        consultationMode: proposal.consultationMode,
+        fee: proposal.fee,
+        currency: proposal.currency || 'XAF',
+      } satisfies PatientProposalView;
+    }));
+    return {
+      items: items.filter((item): item is PatientProposalView => item !== null)
+        .sort((a, b) => Date.parse(b.proposedAt) - Date.parse(a.proposedAt)),
+    };
+  }
+
+  async acceptPatientProposal(
+    firebaseUser: DecodedIdToken, needId: string, proposalId: string,
+  ): Promise<{ proposalId: string; appointmentId: string }> {
+    const db = this.firebase.getFirestore();
+    const needRef = db.collection('medicalNeeds').doc(needId);
+    const proposalRef = db.collection('doctorProposals').doc(proposalId);
+    const preflightProposal = await proposalRef.get();
+    if (!preflightProposal.exists || preflightProposal.data()?.needId !== needId) {
+      throw new NotFoundException('Proposal not found for this request');
+    }
+    const doctorProfileId = (preflightProposal.data() as DoctorProposal).doctorProfileId;
+    const doctorRef = db.collection('doctorProfiles').doc(doctorProfileId);
+    const preflightDoctor = await doctorRef.get();
+    if (!preflightDoctor.exists) throw new NotFoundException('Doctor not found');
+    const doctorUserRef = db.collection('users').doc((preflightDoctor.data() as DoctorProfile).userId);
+    const appointmentRef = db.collection('appointments').doc();
+    const patientRef = db.collection('patients').doc(firebaseUser.uid);
+    const allProposalsQuery = db.collection('doctorProposals').where('needId', '==', needId);
+    const appointmentsQuery = db.collection('appointments').where('doctorProfileId', '==', doctorProfileId);
+    const modesQuery = db.collection('doctorConsultationModes').where('doctorProfileId', '==', doctorProfileId);
+    const weeklyQuery = db.collection('doctorWeeklyAvailabilities').where('doctorProfileId', '==', doctorProfileId);
+    const blockedQuery = db.collection('doctorBlockedDates').where('doctorProfileId', '==', doctorProfileId);
+    const addressesQuery = db.collection('addresses').where('userId', '==', firebaseUser.uid);
+    const now = new Date();
+
+    const result = await db.runTransaction(async (tx) => {
+      // Firestore transaction: read everything first, then write atomically.
+      const [needSnapshot, proposalSnapshot, doctorSnapshot, doctorUserSnapshot,
+        patientSnapshot, allProposals, appointmentsSnapshot, modesSnapshot,
+        weeklySnapshot, blockedSnapshot, addressesSnapshot] = await Promise.all([
+        tx.get(needRef), tx.get(proposalRef), tx.get(doctorRef), tx.get(doctorUserRef),
+        tx.get(patientRef), tx.get(allProposalsQuery), tx.get(appointmentsQuery),
+        tx.get(modesQuery), tx.get(weeklyQuery), tx.get(blockedQuery), tx.get(addressesQuery),
+      ]);
+      if (!needSnapshot.exists) throw new NotFoundException('Medical need not found');
+      const need = needSnapshot.data() as MedicalNeed;
+      this.assertOwner(need, firebaseUser.uid);
+      if (![NeedStatus.PUBLISHED, NeedStatus.AWAITING_PROPOSALS, NeedStatus.PROPOSALS_RECEIVED].includes(need.status)) {
+        throw new ConflictException('A doctor has already been selected or this request is closed');
+      }
+      if (!proposalSnapshot.exists) throw new NotFoundException('Proposal not found');
+      const proposal = proposalSnapshot.data() as DoctorProposal;
+      if (proposal.needId !== needId || proposal.doctorProfileId !== doctorProfileId ||
+          ![ProposalStatus.PENDING, ProposalStatus.SENT].includes(proposal.status)) {
+        throw new ConflictException('This proposal can no longer be accepted');
+      }
+      if (allProposals.docs.some((doc) => doc.id !== proposalId && doc.data().status === ProposalStatus.ACCEPTED)) {
+        throw new ConflictException('Another proposal has already been accepted');
+      }
+      if (!doctorSnapshot.exists || !doctorUserSnapshot.exists) {
+        throw new NotFoundException('Doctor not found');
+      }
+      const doctor = doctorSnapshot.data() as DoctorProfile;
+      const doctorUser = doctorUserSnapshot.data() as User;
+      if (doctor.verificationStatus !== DoctorVerificationStatus.VERIFIED ||
+          doctorUser.role !== AccountRole.DOCTOR || doctorUser.status !== AccountStatus.ACTIVE) {
+        throw new BadRequestException('Doctor is not available for appointments');
+      }
+      if (need.consultationMode !== proposal.consultationMode ||
+          !modesSnapshot.docs.some((doc) => doc.data().mode === proposal.consultationMode)) {
+        throw new BadRequestException('This consultation mode is not available');
+      }
+      if (!proposal.proposedAppointmentAt) throw new BadRequestException('The proposed appointment date is missing');
+      const startsAt = dateFromFirestore(proposal.proposedAppointmentAt);
+      if (!Number.isFinite(startsAt.getTime()) || startsAt.getTime() <= Date.now()) {
+        throw new BadRequestException('The proposed appointment is in the past');
+      }
+      const duration = Number.isSafeInteger(doctor.defaultAppointmentDurationMinutes) &&
+        doctor.defaultAppointmentDurationMinutes > 0 ? doctor.defaultAppointmentDurationMinutes : 30;
+      const endsAt = new Date(startsAt.getTime() + duration * 60_000);
+      const localParts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Africa/Douala', year: 'numeric', month: '2-digit', day: '2-digit',
+        weekday: 'long', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+      }).formatToParts(startsAt);
+      const local = Object.fromEntries(localParts.map(({ type, value }) => [type, value]));
+      const weekday = local.weekday.toLowerCase();
+      const day = `${local.year}-${local.month}-${local.day}`;
+      const minutes = Number(local.hour) * 60 + Number(local.minute);
+      const available = weeklySnapshot.docs.some((doc) => {
+        const slot = doc.data();
+        const [sh, sm] = String(slot.startTime).split(':').map(Number);
+        const [eh, em] = String(slot.endTime).split(':').map(Number);
+        return slot.isAvailable === true && slot.weekday === weekday &&
+          minutes >= sh * 60 + sm && minutes + duration <= eh * 60 + em;
+      });
+      if (!available) throw new BadRequestException('Doctor is not available at the proposed time');
+      const blocked = blockedSnapshot.docs.some((doc) => {
+        const value = doc.data().date as Date | Timestamp;
+        const parts = new Intl.DateTimeFormat('en-GB', {
+          timeZone: 'Africa/Douala', year: 'numeric', month: '2-digit', day: '2-digit',
+        }).formatToParts(dateFromFirestore(value));
+        const localDay = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+        return `${localDay.year}-${localDay.month}-${localDay.day}` === day;
+      });
+      if (blocked) throw new BadRequestException('Doctor is unavailable on the proposed date');
+      const conflict = appointmentsSnapshot.docs.some((doc) => {
+        const old = doc.data();
+        if (![AppointmentStatus.CONFIRMED, AppointmentStatus.PENDING_CONFIRMATION].includes(old.status)) return false;
+        const oldStart = dateFromFirestore(old.scheduledAt as Date | Timestamp).getTime();
+        const oldEnd = oldStart + (Number(old.durationMinutes) || 30) * 60_000;
+        return startsAt.getTime() < oldEnd && endsAt.getTime() > oldStart;
+      });
+      if (conflict) throw new ConflictException('This appointment time is already booked');
+      const primaryAddress = addressesSnapshot.docs.find((doc) => doc.data().isPrimary === true);
+      if (proposal.consultationMode === ConsultationMode.HOME && !primaryAddress) {
+        throw new BadRequestException('Add a primary address before accepting a home visit');
+      }
+      tx.update(proposalRef, {
+        status: ProposalStatus.ACCEPTED, respondedAt: now,
+        patientResponse: 'Proposition acceptée', updatedAt: now,
+      });
+      for (const doc of allProposals.docs) {
+        if (doc.id === proposalId) continue;
+        if ([ProposalStatus.PENDING, ProposalStatus.SENT].includes(doc.data().status)) {
+          tx.update(doc.ref, {
+            status: ProposalStatus.REJECTED,
+            patientResponse: 'Une autre proposition a été acceptée',
+            respondedAt: now, updatedAt: now,
+          });
+        }
+      }
+      tx.update(needRef, { status: NeedStatus.APPOINTMENT_CONFIRMED, updatedAt: now });
+      tx.create(appointmentRef, {
+        id: appointmentRef.id,
+        patientProfileId: patientSnapshot.exists ? (patientSnapshot.data()?.id ?? firebaseUser.uid) : firebaseUser.uid,
+        doctorProfileId, needId, proposalId, status: AppointmentStatus.CONFIRMED,
+        consultationMode: proposal.consultationMode, scheduledAt: startsAt,
+        durationMinutes: duration, fee: proposal.fee, currency: proposal.currency || 'XAF',
+        addressId: primaryAddress ? (primaryAddress.data().id ?? primaryAddress.id) : null,
+        cancellationReason: null, completedAt: null, createdAt: now, updatedAt: now,
+      });
+      return { proposalId, appointmentId: appointmentRef.id, doctorUserId: doctor.userId };
+    });
+    try {
+      await this.notifications.publish({
+        userId: result.doctorUserId, type: NotificationType.PROPOSAL_ACCEPTED,
+        title: 'Votre proposition a été acceptée',
+        body: 'Un patient a accepté votre proposition de consultation.',
+        targetUrl: '/medecin/rendez-vous',
+      });
+    } catch (error) {
+      this.logger.warn(`Appointment ${result.appointmentId} created; notification failed: ${String(error)}`);
+    }
+    return { proposalId: result.proposalId, appointmentId: result.appointmentId };
   }
 
   async getMine(
