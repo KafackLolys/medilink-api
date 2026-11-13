@@ -45,6 +45,8 @@ export interface DoctorDirectoryItem {
   professionalAddress: string | null;
   serviceCity?: string | null;
   serviceDistricts?: string[];
+  blockedDates?: string[];
+  appointmentDurationMinutes?: number;
   modes: DoctorConsultationMode['mode'][];
   availability: DoctorWeeklyAvailability[];
   rating: number | null;
@@ -564,7 +566,7 @@ export class DoctorsService {
         const user = userSnapshot.data() as User;
         if (user.role !== AccountRole.DOCTOR || user.status !== AccountStatus.ACTIVE) return null;
 
-        const [modesSnapshot, availabilitySnapshot, reviewsSnapshot, zoneSnapshot] =
+        const [modesSnapshot, availabilitySnapshot, reviewsSnapshot, zoneSnapshot, blockedDatesSnapshot] =
           await Promise.all([
             this.firebase
               .getFirestore()
@@ -587,6 +589,11 @@ export class DoctorsService {
               .getFirestore()
               .collection('doctorServiceAreaSettings')
               .doc(profile.userId)
+              .get(),
+            this.firebase
+              .getFirestore()
+              .collection('doctorBlockedDates')
+              .where('doctorProfileId', '==', document.id)
               .get(),
           ]);
         const zone = zoneSnapshot.exists ? zoneSnapshot.data() : undefined;
@@ -615,6 +622,17 @@ export class DoctorsService {
           professionalAddress: profile.professionalAddress ?? null,
           serviceCity,
           serviceDistricts,
+          // Only calendar dates; do not expose a doctor's private block reason.
+          blockedDates: blockedDatesSnapshot.docs
+            .map((blocked) => {
+              const value = blocked.data().date as Date | { toDate?: () => Date } | undefined;
+              const date = value instanceof Date ? value : value?.toDate?.();
+              return date instanceof Date && Number.isFinite(date.getTime())
+                ? date.toISOString().slice(0, 10)
+                : null;
+            })
+            .filter((value): value is string => value !== null),
+          appointmentDurationMinutes: profile.defaultAppointmentDurationMinutes ?? 30,
           modes: modesSnapshot.docs
             .map((mode) => (mode.data() as DoctorConsultationMode).mode)
             .filter(Boolean),
