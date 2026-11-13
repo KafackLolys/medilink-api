@@ -6,13 +6,11 @@ async function bootstrap() {
     instrument: ObserveInstrument,
   });
 
-  const allowedOrigins = (process.env.CORS_ORIGINS ?? 'http://localhost:4000')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-
+  // Accept browser requests from any origin. Firebase guards still enforce API access.
+  // With credentials: true, origin: true reflects the request Origin;
+  // origin: '*' would be rejected by browsers for credentialed requests.
   app.enableCors({
-    origin: allowedOrigins,
+    origin: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
