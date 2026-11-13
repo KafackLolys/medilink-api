@@ -19,7 +19,7 @@ export class AdminGuard implements CanActivate {
       .switchToHttp()
       .getRequest<Request & Partial<AuthenticatedRequest>>();
     if (!request.firebaseUser?.uid) {
-      throw new UnauthorizedException('Authentication required');
+      throw new UnauthorizedException('Authentification requise');
     }
 
     const snapshot = await this.firebase
@@ -28,7 +28,7 @@ export class AdminGuard implements CanActivate {
       .doc(request.firebaseUser.uid)
       .get();
     if (!snapshot.exists) {
-      throw new ForbiddenException('Administrator account required');
+      throw new ForbiddenException('Compte administrateur requis');
     }
 
     const user = snapshot.data() as User;
@@ -36,7 +36,7 @@ export class AdminGuard implements CanActivate {
       user.role !== AccountRole.ADMIN ||
       user.status !== AccountStatus.ACTIVE
     ) {
-      throw new ForbiddenException('Administrator account required');
+      throw new ForbiddenException('Compte administrateur requis');
     }
     return true;
   }

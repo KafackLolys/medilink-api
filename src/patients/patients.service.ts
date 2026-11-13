@@ -62,7 +62,7 @@ export class PatientsService {
     const db = this.firebase.getFirestore();
     const userSnapshot = await db.collection('users').doc(uid).get();
     if (!userSnapshot.exists || userSnapshot.data()?.role !== 'patient') {
-      throw new NotFoundException('Patient profile not found');
+      throw new NotFoundException('Profil patient introuvable');
     }
     const patientSnapshot = await db.collection('patients').doc(uid).get();
     const patientProfileId = (patientSnapshot.data()?.id as string | undefined) ?? uid;
@@ -226,7 +226,7 @@ export class PatientsService {
   private async uploadFile(path: string, file: UploadedPatientDocument): Promise<void> {
     const config = this.getStorageConfig();
     if (!config) {
-      throw new ServiceUnavailableException('Storage configuration missing');
+      throw new ServiceUnavailableException('Configuration de stockage manquante');
     }
     const body = new ArrayBuffer(file.buffer.byteLength);
     new Uint8Array(body).set(file.buffer);
@@ -244,14 +244,14 @@ export class PatientsService {
       },
     );
     if (!response.ok) {
-      throw new ServiceUnavailableException(`Upload failed (${response.status})`);
+      throw new ServiceUnavailableException(`Échec du téléversement (${response.status})`);
     }
   }
 
   private async createSignedUrl(path: string): Promise<string> {
     const config = this.getStorageConfig();
     if (!config) {
-      throw new ServiceUnavailableException('Storage configuration missing');
+      throw new ServiceUnavailableException('Configuration de stockage manquante');
     }
     const response = await fetch(
       `${config.url}/storage/v1/object/sign/${encodeURIComponent(config.bucket)}/${encodeStoragePath(path)}`,
@@ -266,11 +266,11 @@ export class PatientsService {
       },
     );
     if (!response.ok) {
-      throw new ServiceUnavailableException(`Signed URL request failed (${response.status})`);
+      throw new ServiceUnavailableException(`Échec de la requête d'URL signée (${response.status})`);
     }
     const payload = (await response.json()) as { signedURL?: string };
     if (!payload.signedURL) {
-      throw new ServiceUnavailableException('Missing signed URL in response');
+      throw new ServiceUnavailableException('URL signée manquante dans la réponse');
     }
     return `${config.url}/storage/v1${payload.signedURL}`;
   }

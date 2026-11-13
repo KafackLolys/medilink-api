@@ -460,7 +460,7 @@ export class NeedsService {
       )
     ) {
       throw new ConflictException(
-        'You have already sent a proposal for this request',
+        'Vous avez déjà envoyé une proposition pour cette demande',
       );
     }
 
@@ -777,43 +777,43 @@ export class NeedsService {
         tx.get(patientRef), tx.get(allProposalsQuery), tx.get(appointmentsQuery),
         tx.get(modesQuery), tx.get(weeklyQuery), tx.get(blockedQuery), tx.get(addressesQuery),
       ]);
-      if (!needSnapshot.exists) throw new NotFoundException('Medical need not found');
+      if (!needSnapshot.exists) throw new NotFoundException('Demande médicale introuvable');
       const need = needSnapshot.data() as MedicalNeed;
       this.assertOwner(need, firebaseUser.uid);
       if (![NeedStatus.PUBLISHED, NeedStatus.AWAITING_PROPOSALS, NeedStatus.PROPOSALS_RECEIVED].includes(need.status)) {
-        throw new ConflictException('A doctor has already been selected or this request is closed');
+        throw new ConflictException('Un médecin a déjà été sélectionné ou cette demande est fermée');
       }
-      if (!proposalSnapshot.exists) throw new NotFoundException('Proposal not found');
+      if (!proposalSnapshot.exists) throw new NotFoundException('Proposition introuvable');
       const proposal = proposalSnapshot.data() as DoctorProposal;
       if (proposal.needId !== needId || proposal.doctorProfileId !== doctorProfileId ||
           ![ProposalStatus.PENDING, ProposalStatus.SENT].includes(proposal.status)) {
-        throw new ConflictException('This proposal can no longer be accepted');
+        throw new ConflictException('Cette proposition ne peut plus être acceptée');
       }
       if (allProposals.docs.some((doc) => doc.id !== proposalId && doc.data().status === ProposalStatus.ACCEPTED)) {
-        throw new ConflictException('Another proposal has already been accepted');
+        throw new ConflictException('Une autre proposition a déjà été acceptée');
       }
       if (!doctorSnapshot.exists || !doctorUserSnapshot.exists) {
-        throw new NotFoundException('Doctor not found');
+        throw new NotFoundException('Médecin introuvable');
       }
       const doctor = doctorSnapshot.data() as DoctorProfile;
       const doctorUser = doctorUserSnapshot.data() as User;
       if (doctor.verificationStatus !== DoctorVerificationStatus.VERIFIED ||
           doctorUser.role !== AccountRole.DOCTOR || doctorUser.status !== AccountStatus.ACTIVE) {
-        throw new BadRequestException('Doctor is not available for appointments');
+        throw new BadRequestException("Le médecin n'est pas disponible pour les rendez-vous");
       }
       // The patient explicitly accepts the proposal's consultation mode, which
       // may differ from the initially requested mode. Only the doctor's actual
       // configured modes can authorize an appointment.
       if (![ConsultationMode.HOME, ConsultationMode.TELECONSULTATION].includes(proposal.consultationMode)) {
-        throw new BadRequestException('Invalid consultation mode in proposal');
+        throw new BadRequestException('Mode de consultation invalide dans la proposition');
       }
       if (!modesSnapshot.docs.some((doc) => doc.data().mode === proposal.consultationMode)) {
-        throw new BadRequestException('The doctor has not activated the proposed consultation mode');
+        throw new BadRequestException('Le médecin n\'a pas activé le mode de consultation proposé');
       }
-      if (!proposal.proposedAppointmentAt) throw new BadRequestException('The proposed appointment date is missing');
+      if (!proposal.proposedAppointmentAt) throw new BadRequestException('La date de rendez-vous proposée est manquante');
       const startsAt = dateFromFirestore(proposal.proposedAppointmentAt);
       if (!Number.isFinite(startsAt.getTime()) || startsAt.getTime() <= Date.now()) {
-        throw new BadRequestException('The proposed appointment is in the past');
+        throw new BadRequestException('Le rendez-vous proposé est dans le passé');
       }
       const duration = Number.isSafeInteger(doctor.defaultAppointmentDurationMinutes) &&
         doctor.defaultAppointmentDurationMinutes > 0 ? doctor.defaultAppointmentDurationMinutes : 30;
@@ -833,7 +833,7 @@ export class NeedsService {
         return slot.isAvailable === true && slot.weekday === weekday &&
           minutes >= sh * 60 + sm && minutes + duration <= eh * 60 + em;
       });
-      if (!available) throw new BadRequestException('Doctor is not available at the proposed time');
+      if (!available) throw new BadRequestException("Le médecin n'est pas disponible à l'heure proposée");
       const blocked = blockedSnapshot.docs.some((doc) => {
         const value = doc.data().date as Date | Timestamp;
         const parts = new Intl.DateTimeFormat('en-GB', {
@@ -842,7 +842,7 @@ export class NeedsService {
         const localDay = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
         return `${localDay.year}-${localDay.month}-${localDay.day}` === day;
       });
-      if (blocked) throw new BadRequestException('Doctor is unavailable on the proposed date');
+      if (blocked) throw new BadRequestException('Le médecin est indisponible à la date proposée');
       const conflict = appointmentsSnapshot.docs.some((doc) => {
         const old = doc.data();
         if (![AppointmentStatus.CONFIRMED, AppointmentStatus.PENDING_CONFIRMATION].includes(old.status)) return false;
@@ -850,10 +850,10 @@ export class NeedsService {
         const oldEnd = oldStart + (Number(old.durationMinutes) || 30) * 60_000;
         return startsAt.getTime() < oldEnd && endsAt.getTime() > oldStart;
       });
-      if (conflict) throw new ConflictException('This appointment time is already booked');
+      if (conflict) throw new ConflictException('Ce créneau de rendez-vous est déjà réservé');
       const primaryAddress = addressesSnapshot.docs.find((doc) => doc.data().isPrimary === true);
       if (proposal.consultationMode === ConsultationMode.HOME && !primaryAddress) {
-        throw new BadRequestException('Add a primary address before accepting a home visit');
+        throw new BadRequestException('Ajoutez une adresse principale avant d\'accepter une visite à domicile');
       }
       tx.update(proposalRef, {
         status: ProposalStatus.ACCEPTED, respondedAt: now,
@@ -902,7 +902,7 @@ export class NeedsService {
     const needRef = firestore.collection('medicalNeeds').doc(id);
     const snapshot = await needRef.get();
     if (!snapshot.exists) {
-      throw new NotFoundException('Medical need not found');
+      throw new NotFoundException('Demande médicale introuvable');
     }
 
     const need = snapshot.data() as MedicalNeed;
@@ -956,7 +956,7 @@ export class NeedsService {
     const needRef = firestore.collection('medicalNeeds').doc(id);
     const snapshot = await needRef.get();
     if (!snapshot.exists) {
-      throw new NotFoundException('Medical need not found');
+      throw new NotFoundException('Demande médicale introuvable');
     }
     const need = snapshot.data() as MedicalNeed;
     this.assertOwner(need, firebaseUser.uid);
@@ -1000,11 +1000,11 @@ export class NeedsService {
       .doc(firebaseUser.uid)
       .get();
     if (!userSnapshot.exists) {
-      throw new NotFoundException('Application account not found');
+      throw new NotFoundException('Compte d\'application introuvable');
     }
     const user = userSnapshot.data() as User;
     if (user.role !== AccountRole.PATIENT) {
-      throw new ForbiddenException('Only patients can publish medical needs');
+      throw new ForbiddenException('Seuls les patients peuvent publier des demandes médicales');
     }
 
     const needRef = firestore.collection('medicalNeeds').doc();
@@ -1090,7 +1090,7 @@ export class NeedsService {
         error instanceof Error ? error.stack : undefined,
       );
       throw new ServiceUnavailableException(
-        'The request could not be published. Verify Supabase Storage configuration and try again.',
+        'La demande n\'a pas pu être publiée. Vérifiez la configuration Supabase Storage et réessayez.',
       );
     }
   }
@@ -1099,7 +1099,7 @@ export class NeedsService {
     const needRef = this.firebase.getFirestore().collection('medicalNeeds').doc(id);
     const snapshot = await needRef.get();
     if (!snapshot.exists) {
-      throw new NotFoundException('Medical need not found');
+      throw new NotFoundException('Demande médicale introuvable');
     }
     const need = snapshot.data() as MedicalNeed;
     this.assertOwner(need, firebaseUser.uid);
@@ -1110,7 +1110,7 @@ export class NeedsService {
         NeedStatus.PROPOSALS_RECEIVED,
       ].includes(need.status)
     ) {
-      throw new BadRequestException('Only active requests can be closed');
+      throw new BadRequestException('Seules les demandes actives peuvent être fermées');
     }
     await needRef.update({
       status: NeedStatus.CLOSED,
@@ -1123,12 +1123,12 @@ export class NeedsService {
     const needRef = firestore.collection('medicalNeeds').doc(id);
     const snapshot = await needRef.get();
     if (!snapshot.exists) {
-      throw new NotFoundException('Medical need not found');
+      throw new NotFoundException('Demande médicale introuvable');
     }
     const need = snapshot.data() as MedicalNeed;
     this.assertOwner(need, firebaseUser.uid);
     if (need.status !== NeedStatus.DRAFT) {
-      throw new BadRequestException('Only draft requests can be deleted');
+      throw new BadRequestException('Seules les demandes en brouillon peuvent être supprimées');
     }
 
     const attachments = need.attachments ?? [];
@@ -1143,7 +1143,7 @@ export class NeedsService {
           error instanceof Error ? error.stack : undefined,
         );
         throw new ServiceUnavailableException(
-          'The request files could not be removed. The request was not deleted.',
+          'Les fichiers de la demande n\'ont pas pu être supprimés. La demande n\'a pas été supprimée.',
         );
       }
     }
@@ -1155,19 +1155,19 @@ export class NeedsService {
     try {
       value = JSON.parse(serializedRequest);
     } catch {
-      throw new BadRequestException('Request details must be valid JSON');
+      throw new BadRequestException('Les détails de la demande doivent être un JSON valide');
     }
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      throw new BadRequestException('Request details are required');
+      throw new BadRequestException('Les détails de la demande sont requis');
     }
     const request = value as Partial<CreateNeedRequest>;
     const text = (field: unknown): field is string =>
       typeof field === 'string';
     if (!text(request.title) || request.title.trim().length < 5) {
-      throw new BadRequestException('title must contain at least 5 characters');
+      throw new BadRequestException('Le titre doit contenir au moins 5 caractères');
     }
     if (!text(request.specialty) || !request.specialty.trim()) {
-      throw new BadRequestException('specialty is required');
+      throw new BadRequestException('La spécialité est requise');
     }
     if (
       !text(request.description) ||
@@ -1175,34 +1175,34 @@ export class NeedsService {
       request.description.length > 800
     ) {
       throw new BadRequestException(
-        'description must contain between 20 and 800 characters',
+        'La description doit contenir entre 20 et 800 caractères',
       );
     }
     if (
       !Array.isArray(request.symptoms) ||
       request.symptoms.some((symptom) => !text(symptom))
     ) {
-      throw new BadRequestException('symptoms must be a list of strings');
+      throw new BadRequestException('Les symptômes doivent être une liste de chaînes de caractères');
     }
     if (!text(request.city) || !request.city.trim()) {
-      throw new BadRequestException('city is required');
+      throw new BadRequestException('La ville est requise');
     }
     if (!text(request.district) || !request.district.trim()) {
-      throw new BadRequestException('district is required');
+      throw new BadRequestException('Le district est requis');
     }
     if (request.priority === 'urgence') {
       throw new BadRequestException(
-        'Medical emergencies must be handled by emergency services',
+        'Les urgences médicales doivent être traitées par les services d\'urgence',
       );
     }
     if (request.priority !== 'normal' && request.priority !== 'rapide') {
-      throw new BadRequestException('priority is invalid');
+      throw new BadRequestException('La priorité est invalide');
     }
     if (request.mode !== 'domicile' && request.mode !== 'tele') {
-      throw new BadRequestException('consultation mode is invalid');
+      throw new BadRequestException('Le mode de consultation est invalide');
     }
     if (request.consent !== true) {
-      throw new BadRequestException('Consent is required to publish a request');
+      throw new BadRequestException('Le consentement est requis pour publier une demande');
     }
     return {
       title: request.title.trim(),
@@ -1221,7 +1221,7 @@ export class NeedsService {
 
   private validateFiles(files: UploadedNeedFile[]): void {
     if (files.length > MAX_FILES) {
-      throw new BadRequestException(`A maximum of ${MAX_FILES} files is allowed`);
+      throw new BadRequestException(`Un maximum de ${MAX_FILES} fichiers est autorisé`);
     }
     for (const file of files) {
       if (!ALLOWED_FILE_TYPES.has(file.mimetype) || !this.hasValidSignature(file)) {
@@ -1267,7 +1267,7 @@ export class NeedsService {
 
   private assertOwner(need: MedicalNeed, uid: string): void {
     if (need.ownerUserId !== uid) {
-      throw new ForbiddenException('You cannot modify this medical need');
+      throw new ForbiddenException('Vous ne pouvez pas modifier cette demande médicale');
     }
   }
 
@@ -1275,11 +1275,11 @@ export class NeedsService {
     const firestore = this.firebase.getFirestore();
     const userSnapshot = await firestore.collection('users').doc(uid).get();
     if (!userSnapshot.exists) {
-      throw new NotFoundException('Application account not found');
+      throw new NotFoundException('Compte d\'application introuvable');
     }
     const user = userSnapshot.data() as User;
     if (user.role !== AccountRole.DOCTOR) {
-      throw new ForbiddenException('Only doctors can access patient requests');
+      throw new ForbiddenException('Seuls les médecins peuvent accéder aux demandes des patients');
     }
 
     const doctorSnapshot = await firestore
@@ -1289,12 +1289,12 @@ export class NeedsService {
       .get();
     const document = doctorSnapshot.docs[0];
     if (!document) {
-      throw new ForbiddenException('Doctor profile is not available');
+      throw new ForbiddenException('Profil médecin indisponible');
     }
     const profile = document.data() as DoctorProfile;
     if (profile.verificationStatus !== DoctorVerificationStatus.VERIFIED) {
       throw new ForbiddenException(
-        'Only verified doctors can access patient requests',
+        'Seuls les médecins vérifiés peuvent accéder aux demandes des patients',
       );
     }
     return { ...profile, id: profile.id || document.id };
@@ -1383,7 +1383,7 @@ export class NeedsService {
     const bucket = process.env.SUPABASE_STORAGE_BUCKET;
     if (!url || !serviceRoleKey || !bucket) {
       throw new ServiceUnavailableException(
-        'SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and SUPABASE_STORAGE_BUCKET must be configured',
+        'SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY et SUPABASE_STORAGE_BUCKET doivent être configurés',
       );
     }
 
@@ -1412,7 +1412,7 @@ export class NeedsService {
     );
     if (!response.ok) {
       throw new ServiceUnavailableException(
-        `Supabase Storage upload failed (${response.status})`,
+        `Échec du téléversement Supabase Storage (${response.status})`,
       );
     }
 
@@ -1435,13 +1435,13 @@ export class NeedsService {
     );
     if (!response.ok) {
       throw new ServiceUnavailableException(
-        `Supabase Storage signed URL request failed (${response.status})`,
+        `Échec de la requête d'URL signée Supabase Storage (${response.status})`,
       );
     }
     const payload = (await response.json()) as { signedURL?: string };
     if (!payload.signedURL) {
       throw new ServiceUnavailableException(
-        'Supabase Storage returned no signed URL',
+        'Supabase Storage n\'a retourné aucune URL signée',
       );
     }
     return payload.signedURL.startsWith('http')
@@ -1465,7 +1465,7 @@ export class NeedsService {
     );
     if (!response.ok) {
       throw new ServiceUnavailableException(
-        `Supabase Storage cleanup failed (${response.status})`,
+        `Échec du nettoyage Supabase Storage (${response.status})`,
       );
     }
   }

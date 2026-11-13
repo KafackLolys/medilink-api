@@ -706,7 +706,7 @@ export class DoctorsService {
     const bucket = process.env.SUPABASE_STORAGE_BUCKET;
     if (!url || !serviceRoleKey || !bucket) {
       throw new ServiceUnavailableException(
-        'SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and SUPABASE_STORAGE_BUCKET must be configured',
+        'SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY et SUPABASE_STORAGE_BUCKET doivent être configurés',
       );
     }
     return { url, serviceRoleKey, bucket };
@@ -734,7 +734,7 @@ export class DoctorsService {
     );
     if (!response.ok) {
       throw new ServiceUnavailableException(
-        `Supabase Storage upload failed (${response.status})`,
+        `Échec du téléversement Supabase Storage (${response.status})`,
       );
     }
   }
@@ -755,13 +755,13 @@ export class DoctorsService {
     );
     if (!response.ok) {
       throw new ServiceUnavailableException(
-        `Supabase Storage signed URL request failed (${response.status})`,
+        `Échec de la requête d'URL signée Supabase Storage (${response.status})`,
       );
     }
     const payload = (await response.json()) as { signedURL?: string };
     if (!payload.signedURL) {
       throw new ServiceUnavailableException(
-        'Supabase Storage returned no signed URL',
+        'Supabase Storage n\'a retourné aucune URL signée',
       );
     }
     return payload.signedURL.startsWith('http')

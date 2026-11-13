@@ -276,10 +276,10 @@ export class MessagesService {
   ): Promise<ConversationContext[]> {
     const firestore = this.firebase.getFirestore();
     const userSnapshot = await firestore.collection('users').doc(userId).get();
-    if (!userSnapshot.exists) throw new NotFoundException('Account not found');
+    if (!userSnapshot.exists) throw new NotFoundException('Compte introuvable');
     const user = userSnapshot.data() as User;
     if (user.role !== AccountRole.DOCTOR && user.role !== AccountRole.PATIENT) {
-      throw new ForbiddenException('Only patients and doctors can use messaging');
+      throw new ForbiddenException('Seuls les patients et les médecins peuvent utiliser la messagerie');
     }
 
     let doctorProfile: DoctorProfile | null = null;
@@ -290,13 +290,13 @@ export class MessagesService {
         .limit(1)
         .get();
       const profileDoc = profiles.docs[0];
-      if (!profileDoc) throw new ForbiddenException('Doctor profile is not available');
+      if (!profileDoc) throw new ForbiddenException('Profil médecin indisponible');
       doctorProfile = {
         ...(profileDoc.data() as DoctorProfile),
         id: (profileDoc.data() as DoctorProfile).id || profileDoc.id,
       };
       if (doctorProfile.verificationStatus !== DoctorVerificationStatus.VERIFIED) {
-        throw new ForbiddenException('Only verified doctors can use messaging');
+        throw new ForbiddenException('Seuls les médecins vérifiés peuvent utiliser la messagerie');
       }
     }
 
@@ -400,10 +400,10 @@ export class MessagesService {
         .get();
       snapshot = byId.docs[0] ?? snapshot;
     }
-    if (!snapshot.exists) throw new NotFoundException('Doctor profile not found');
+    if (!snapshot.exists) throw new NotFoundException('Profil médecin introuvable');
     const profile = snapshot.data() as DoctorProfile;
     if (profile.verificationStatus !== DoctorVerificationStatus.VERIFIED) {
-      throw new ForbiddenException('Only verified doctors can use messaging');
+      throw new ForbiddenException('Seuls les médecins vérifiés peuvent utiliser la messagerie');
     }
     return { ...profile, id: profile.id || snapshot.id };
   }

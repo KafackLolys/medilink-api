@@ -67,7 +67,7 @@ function localDateParts(date: Date, timeZone: string) {
     }).formatToParts(date);
     return Object.fromEntries(parts.map(({ type, value }) => [type, value]));
   } catch {
-    throw new BadRequestException('timeZone must be a valid IANA time zone');
+    throw new BadRequestException('Le fuseau horaire doit être un fuseau horaire IANA valide');
   }
 }
 
@@ -99,24 +99,24 @@ export class AppointmentsService {
       !request.doctorId.trim() ||
       !Object.values(ConsultationMode).includes(request.consultationMode)
     ) {
-      throw new BadRequestException('A doctor and consultation mode are required');
+      throw new BadRequestException('Un médecin et un mode de consultation sont requis');
     }
     if (
       typeof request.scheduledAt !== 'string' ||
       Number.isNaN(Date.parse(request.scheduledAt))
     ) {
-      throw new BadRequestException('scheduledAt must be a valid date');
+      throw new BadRequestException('scheduledAt doit être une date valide');
     }
     if (typeof request.timeZone !== 'string' || !request.timeZone.trim()) {
-      throw new BadRequestException('timeZone is required');
+      throw new BadRequestException('Le fuseau horaire est requis');
     }
     const scheduledAt = new Date(request.scheduledAt);
     if (scheduledAt.getTime() <= Date.now()) {
-      throw new BadRequestException('Appointment must be scheduled in the future');
+      throw new BadRequestException('Le rendez-vous doit être programmé dans le futur');
     }
     const reason = request.reason?.trim() ?? '';
     if (reason.length > 500) {
-      throw new BadRequestException('reason must be 500 characters or fewer');
+      throw new BadRequestException('La raison doit contenir 500 caractères ou moins');
     }
     const localDate = localDateParts(scheduledAt, request.timeZone);
     const weekday = localDate.weekday.toLowerCase();
@@ -134,14 +134,14 @@ export class AppointmentsService {
       (userSnapshot.data() as User).role !== AccountRole.PATIENT ||
       (userSnapshot.data() as User).status !== AccountStatus.ACTIVE
     ) {
-      throw new ForbiddenException('Only patients can request appointments');
+      throw new ForbiddenException('Seuls les patients peuvent demander des rendez-vous');
     }
     if (!doctorSnapshot.exists) {
-      throw new NotFoundException('Doctor not found');
+      throw new NotFoundException('Médecin introuvable');
     }
     const doctor = doctorSnapshot.data() as DoctorProfile;
     if (doctor.verificationStatus !== DoctorVerificationStatus.VERIFIED) {
-      throw new NotFoundException('Verified doctor not found');
+      throw new NotFoundException('Médecin vérifié introuvable');
     }
     const doctorUserSnapshot = await firestore
       .collection('users')
@@ -151,7 +151,7 @@ export class AppointmentsService {
       !doctorUserSnapshot.exists ||
       (doctorUserSnapshot.data() as User).status !== AccountStatus.ACTIVE
     ) {
-      throw new NotFoundException('Verified doctor not found');
+      throw new NotFoundException('Médecin vérifié introuvable');
     }
     const durationMinutes =
       Number.isSafeInteger(doctor.defaultAppointmentDurationMinutes) &&
@@ -185,7 +185,7 @@ export class AppointmentsService {
       (document) => (document.data() as DoctorConsultationMode).mode,
     );
     if (!modes.includes(request.consultationMode)) {
-      throw new BadRequestException('This doctor does not offer that consultation mode');
+      throw new BadRequestException('Ce médecin ne propose pas ce mode de consultation');
     }
     const availability = availabilitySnapshot.docs
       .map((document) => document.data() as DoctorWeeklyAvailability)
@@ -200,7 +200,7 @@ export class AppointmentsService {
               Number(slot.endTime.slice(3, 5))),
       );
     if (!availability) {
-      throw new BadRequestException('The doctor is not available at the selected time');
+      throw new BadRequestException("Le médecin n'est pas disponible à l'heure sélectionnée");
     }
     const isBlocked = blockedDatesSnapshot.docs.some((document) => {
       const blockedDate = document.data().date as Date | Timestamp;
@@ -209,7 +209,7 @@ export class AppointmentsService {
       }-${localDateParts(asDate(blockedDate), request.timeZone).day}` === localDay;
     });
     if (isBlocked) {
-      throw new BadRequestException('The doctor is unavailable on the selected date');
+      throw new BadRequestException('Le médecin est indisponible à la date sélectionnée');
     }
     const primaryAddress = addressSnapshot?.docs.find(
       (document) => document.data().isPrimary === true,
@@ -266,7 +266,7 @@ export class AppointmentsService {
         return scheduledAt.getTime() < existingEnd && endTime > existingStart;
       });
       if (hasConflict) {
-        throw new BadRequestException('This appointment time is no longer available');
+        throw new BadRequestException('Ce créneau de rendez-vous n\'est plus disponible');
       }
       transaction.create(appointmentRef, appointment);
     });
@@ -352,13 +352,13 @@ export class AppointmentsService {
     const patient = await db.collection('patients').doc(uid).get();
     const patientProfileId = (patient.data()?.id as string | undefined) ?? uid;
     if (!appointment.exists || appointment.data()?.patientProfileId !== patientProfileId) {
-      throw new NotFoundException('Appointment not found');
+      throw new NotFoundException('Rendez-vous introuvable');
     }
     const existing = await db.collection('reviews').doc(appointmentId).get();
     if (!existing.exists) return null;
     const review = existing.data();
     if (review?.patientProfileId !== patientProfileId) {
-      throw new NotFoundException('Review not found');
+      throw new NotFoundException('Avis introuvable');
     }
     return {id: existing.id, rating: Number(review.rating), comment: review.comment ?? null};
   }
@@ -381,7 +381,7 @@ export class AppointmentsService {
         transaction.get(appointmentRef), transaction.get(reviewRef),
       ]);
       if (!appointmentSnapshot.exists || appointmentSnapshot.data()?.patientProfileId !== patientProfileId) {
-        throw new NotFoundException('Appointment not found');
+        throw new NotFoundException('Rendez-vous introuvable');
       }
       const appointment = appointmentSnapshot.data() as Appointment;
       if (appointment.status !== AppointmentStatus.COMPLETED) {
@@ -405,7 +405,7 @@ export class AppointmentsService {
   ): Promise<PatientAppointmentView> {
     const appointments = await this.listMine(firebaseUser);
     const appointment = appointments.find((item) => item.id === id);
-    if (!appointment) throw new NotFoundException('Appointment not found');
+    if (!appointment) throw new NotFoundException('Rendez-vous introuvable');
     return appointment;
   }
 

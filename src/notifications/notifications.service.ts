@@ -132,9 +132,9 @@ export class NotificationsService {
       .collection('notifications')
       .doc(notificationId);
     const snapshot = await reference.get();
-    if (!snapshot.exists) throw new NotFoundException('Notification not found');
+    if (!snapshot.exists) throw new NotFoundException('Notification introuvable');
     if ((snapshot.data() as Notification).userId !== firebaseUser.uid) {
-      throw new ForbiddenException('You cannot modify this notification');
+      throw new ForbiddenException('Vous ne pouvez pas modifier cette notification');
     }
     const readAt = new Date();
     await reference.update({ readAt, updatedAt: readAt });
@@ -230,7 +230,7 @@ export class NotificationsService {
     const snapshot = await reference.get();
     if (!snapshot.exists) return { removed: false };
     if (snapshot.data()?.userId !== firebaseUser.uid) {
-      throw new ForbiddenException('You cannot remove this notification device');
+      throw new ForbiddenException('Vous ne pouvez pas supprimer cet appareil de notification');
     }
     await reference.delete();
     return { removed: true };

@@ -159,7 +159,7 @@ export class AuthService {
     const uid = tokens.localId;
     if (!uid) {
       throw new ServiceUnavailableException(
-        'Firebase Authentication returned no user identifier',
+        'Firebase Authentication n\'a retourné aucun identifiant utilisateur',
       );
     }
 
@@ -199,7 +199,7 @@ export class AuthService {
         const existingUser = await transaction.get(userRef);
         if (existingUser.exists) {
           throw new ConflictException(
-            'This Firebase account is already registered',
+            'Ce compte Firebase est déjà enregistré',
           );
         }
         const existingDoctorProfile =
@@ -208,7 +208,7 @@ export class AuthService {
             : null;
         if (existingDoctorProfile?.exists) {
           throw new ConflictException(
-            'A professional profile already exists for this account',
+            'Un profil professionnel existe déjà pour ce compte',
           );
         }
         transaction.create(userRef, user);
@@ -256,7 +256,7 @@ export class AuthService {
             cleanupError instanceof Error ? cleanupError.stack : undefined,
           );
           throw new ServiceUnavailableException(
-            'Registration failed and the Firebase account could not be rolled back',
+            'L\'inscription a échoué et le compte Firebase n\'a pas pu être annulé',
           );
         }
       }
@@ -412,7 +412,7 @@ export class AuthService {
       if (!snapshot.exists) throw new NotFoundException('Account not found');
       const user = snapshot.data() as User;
       if (user.role !== AccountRole.ADMIN || user.status !== AccountStatus.ACTIVE) {
-        throw new ForbiddenException('Only an active administrator can edit this profile');
+        throw new ForbiddenException('Seul un administrateur actif peut modifier ce profil');
       }
       transaction.update(ref, { firstName, lastName, phone, updatedAt: new Date() });
     });
@@ -442,7 +442,7 @@ export class AuthService {
       user.status === AccountStatus.SUSPENDED ||
       user.status === AccountStatus.DELETED
     ) {
-      throw new ForbiddenException('This account is not active');
+      throw new ForbiddenException('Ce compte n\'est pas actif');
     }
   }
 
@@ -450,7 +450,7 @@ export class AuthService {
     try {
       return await this.firebase.getAuth().verifyIdToken(idToken, true);
     } catch {
-      throw new UnauthorizedException('Invalid or revoked Firebase ID token');
+      throw new UnauthorizedException('Jeton Firebase ID invalide ou révoqué');
     }
   }
 
@@ -469,7 +469,7 @@ export class AuthService {
       });
     } catch {
       throw new ServiceUnavailableException(
-        'Unable to reach Firebase Authentication',
+        'Impossible de joindre Firebase Authentication',
       );
     }
 
@@ -498,7 +498,7 @@ export class AuthService {
       });
     } catch {
       throw new ServiceUnavailableException(
-        'Unable to reach Firebase Authentication',
+        'Impossible de joindre Firebase Authentication',
       );
     }
 
@@ -527,7 +527,7 @@ export class AuthService {
   ): never {
     const code = message?.split(':')[0] ?? '';
     if (code === 'EMAIL_EXISTS') {
-      throw new ConflictException('An account with this email already exists');
+      throw new ConflictException('Un compte avec cet email existe déjà');
     }
     if (
       [
@@ -540,7 +540,7 @@ export class AuthService {
         'USER_TOKEN_EXPIRED',
       ].includes(code)
     ) {
-      throw new UnauthorizedException('Invalid credentials or expired session');
+      throw new UnauthorizedException('Identifiants invalides ou session expirée');
     }
     if (
       [
@@ -551,21 +551,21 @@ export class AuthService {
       ].includes(code)
     ) {
       throw new BadRequestException(
-        'Firebase rejected the supplied credentials',
+        'Firebase a rejeté les identifiants fournis',
       );
     }
     if (['API_KEY_INVALID', 'API_KEY_SERVICE_BLOCKED'].includes(code)) {
       throw new ServiceUnavailableException(
-        'FIREBASE_WEB_API_KEY is invalid or unavailable',
+        'FIREBASE_WEB_API_KEY est invalide ou indisponible',
       );
     }
     if (code === 'CONFIGURATION_NOT_FOUND') {
       throw new ServiceUnavailableException(
-        'Firebase Authentication is not configured for this project. Enable Email/Password sign-in in Firebase Console and verify that FIREBASE_WEB_API_KEY belongs to FIREBASE_PROJECT_ID.',
+        'Firebase Authentication n\'est pas configuré pour ce projet. Activez l\'authentification Email/Mot de passe dans Firebase Console et vérifiez que FIREBASE_WEB_API_KEY appartient à FIREBASE_PROJECT_ID.',
       );
     }
     throw new ServiceUnavailableException(
-      `Firebase Authentication request failed (${code || status})`,
+      `La requête Firebase Authentication a échoué (${code || status})`,
     );
   }
 
@@ -573,7 +573,7 @@ export class AuthService {
     const apiKey = process.env.FIREBASE_WEB_API_KEY;
     if (!apiKey) {
       throw new ServiceUnavailableException(
-        'FIREBASE_WEB_API_KEY must be configured for Firebase Authentication',
+        'FIREBASE_WEB_API_KEY doit être configuré pour Firebase Authentication',
       );
     }
     return apiKey;
@@ -592,7 +592,7 @@ export class AuthService {
       expiresIn <= 0
     ) {
       throw new ServiceUnavailableException(
-        'Firebase Authentication returned an incomplete token response',
+        'Firebase Authentication a retourné une réponse de jeton incomplète',
       );
     }
     return { idToken, refreshToken, expiresIn, tokenType: 'Bearer' };

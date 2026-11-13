@@ -73,7 +73,7 @@ export class AdminService {
   async listAccounts(query: AdminAccountsQuery): Promise<AdminAccountPage> {
     const role = query.role?.trim() || AccountRole.PATIENT;
     if (role !== AccountRole.PATIENT && role !== AccountRole.DOCTOR) {
-      throw new BadRequestException('role must be patient or doctor');
+      throw new BadRequestException('Le rôle doit être patient ou médecin');
     }
     const page = this.parsePositiveInteger(query.page, 1, 'page', 1_000_000);
     const pageSize = this.parsePositiveInteger(
@@ -84,7 +84,7 @@ export class AdminService {
     );
     const search = query.q?.trim().toLocaleLowerCase() ?? '';
     if (search.length > 100) {
-      throw new BadRequestException('q must be 100 characters or fewer');
+      throw new BadRequestException('q doit contenir 100 caractères ou moins');
     }
 
     const firestore = this.firebase.getFirestore();
@@ -152,12 +152,12 @@ export class AdminService {
     status: AccountStatus,
   ): Promise<{ id: string; status: AccountStatus }> {
     if (!Object.values(AccountStatus).includes(status)) {
-      throw new BadRequestException('status is invalid');
+      throw new BadRequestException('Le statut est invalide');
     }
     const firestore = this.firebase.getFirestore();
     const userRef = firestore.collection('users').doc(id);
     const snapshot = await userRef.get();
-    if (!snapshot.exists) throw new NotFoundException('Account not found');
+    if (!snapshot.exists) throw new NotFoundException('Compte introuvable');
     const user = snapshot.data() as User;
     this.assertManageableAccount(actorUid, user, id);
 
@@ -180,7 +180,7 @@ export class AdminService {
         error instanceof Error ? error.stack : undefined,
       );
       throw new ServiceUnavailableException(
-        'The account status was saved, but Firebase Authentication could not be synchronized',
+        'Le statut du compte a été enregistré, mais Firebase Authentication n\'a pas pu être synchronisé',
       );
     }
     return { id, status };
@@ -198,14 +198,14 @@ export class AdminService {
     const firestore = this.firebase.getFirestore();
     const userRef = firestore.collection('users').doc(id);
     const snapshot = await userRef.get();
-    if (!snapshot.exists) throw new NotFoundException('Account not found');
+    if (!snapshot.exists) throw new NotFoundException('Compte introuvable');
     const user = snapshot.data() as User;
     this.assertManageableAccount(actorUid, user, id);
 
     if (user.role === AccountRole.PATIENT) {
       if (typeof request.emailVerified !== 'boolean') {
         throw new BadRequestException(
-          'emailVerified must be a boolean for patient accounts',
+          'emailVerified doit être un booléen pour les comptes patients',
         );
       }
       await this.firebase.getAuth().updateUser(id, {
@@ -225,7 +225,7 @@ export class AdminService {
       )
     ) {
       throw new BadRequestException(
-        'verificationStatus is invalid for doctor accounts',
+        'verificationStatus est invalide pour les comptes médecins',
       );
     }
     const doctorSnapshot = await firestore
@@ -235,7 +235,7 @@ export class AdminService {
       .get();
     const doctorDocument = doctorSnapshot.docs[0];
     if (!doctorDocument) {
-      throw new NotFoundException('Doctor profile not found');
+      throw new NotFoundException('Profil médecin introuvable');
     }
     const verificationStatus =
       request.verificationStatus as DoctorVerificationStatus;
@@ -260,21 +260,21 @@ export class AdminService {
 
   async createAdmin(request: CreateAdminRequest): Promise<AdminAccount> {
     if (!isRecord(request)) {
-      throw new BadRequestException('An administrator object is required');
+      throw new BadRequestException('Un objet administrateur est requis');
     }
     const firstName = this.requireText(request.firstName, 'firstName');
     const lastName = this.requireText(request.lastName, 'lastName');
     const email = this.requireText(request.email, 'email').toLowerCase();
     if (!/^\S+@\S+\.\S+$/.test(email)) {
-      throw new BadRequestException('email must be valid');
+      throw new BadRequestException('L\'email doit être valide');
     }
     if (typeof request.password !== 'string' || request.password.length < 8) {
       throw new BadRequestException(
-        'password must contain at least 8 characters',
+        'Le mot de passe doit contenir au moins 8 caractères',
       );
     }
     if (request.phone !== undefined && typeof request.phone !== 'string') {
-      throw new BadRequestException('phone must be a string');
+      throw new BadRequestException('phone doit être une chaîne de caractères');
     }
 
     let uid: string;
@@ -296,10 +296,10 @@ export class AdminService {
       ) {
         if (error.code === 'auth/email-already-exists') {
           throw new ConflictException(
-            'An account with this email already exists',
+            'Un compte avec cet email existe déjà',
           );
         }
-        throw new BadRequestException('Firebase rejected the account details');
+        throw new BadRequestException('Firebase a rejeté les détails du compte');
       }
       throw error;
     }
@@ -333,7 +333,7 @@ export class AdminService {
           cleanupError instanceof Error ? cleanupError.stack : undefined,
         );
         throw new ServiceUnavailableException(
-          'Administrator creation failed and the Firebase account could not be rolled back',
+          'La création de l\'administrateur a échoué et le compte Firebase n\'a pas pu être annulé',
         );
       }
       throw error;
@@ -362,13 +362,13 @@ export class AdminService {
       targetUid === actorUid ||
       (user.role !== AccountRole.PATIENT && user.role !== AccountRole.DOCTOR)
     ) {
-      throw new ConflictException('This account cannot be modified');
+      throw new ConflictException('Ce compte ne peut pas être modifié');
     }
   }
 
   private requireText(value: unknown, field: string): string {
     if (typeof value !== 'string' || !value.trim()) {
-      throw new BadRequestException(`${field} is required`);
+      throw new BadRequestException(`${field} est requis`);
     }
     return value.trim();
   }
@@ -381,11 +381,11 @@ export class AdminService {
   ): number {
     if (value === undefined || value === '') return fallback;
     if (!/^\d+$/.test(value)) {
-      throw new BadRequestException(`${name} must be a positive integer`);
+      throw new BadRequestException(`${name} doit être un entier positif`);
     }
     const parsed = Number(value);
     if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > max) {
-      throw new BadRequestException(`${name} must be between 1 and ${max}`);
+      throw new BadRequestException(`${name} doit être compris entre 1 et ${max}`);
     }
     return parsed;
   }
