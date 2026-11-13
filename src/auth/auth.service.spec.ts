@@ -45,7 +45,7 @@ describe('AuthService', () => {
     revokeRefreshTokens: jest.fn(),
     verifyIdToken: jest.fn(),
   };
-  const fetchMock = jest.fn<typeof fetch>();
+  const fetchMock = jest.fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>();
   const originalFetch = globalThis.fetch;
   const originalApiKey = process.env.FIREBASE_WEB_API_KEY;
   let service: AuthService;

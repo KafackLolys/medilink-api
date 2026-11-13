@@ -250,7 +250,8 @@ export class AdminService {
     // activate that account, otherwise the directory excludes the doctor.
     // Never automatically reactivate suspended/deleted accounts.
     if (verificationStatus === DoctorVerificationStatus.VERIFIED &&
-        user.status === AccountStatus.PENDING) {
+        (user.status === AccountStatus.PENDING ||
+         (user.status as string) === DoctorVerificationStatus.VERIFIED)) {
       batch.update(userRef, { status: AccountStatus.ACTIVE, updatedAt: now });
     }
     await batch.commit();

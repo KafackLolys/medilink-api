@@ -1,3 +1,4 @@
+import { NotificationType } from '../interfaces/database';
 import { ForbiddenException } from '@nestjs/common';
 import { FirebaseService } from '../firebase/firebase.service';
 import { NotificationsService } from './notifications.service';
@@ -49,7 +50,7 @@ describe('NotificationsService', () => {
   it('stores the internal notification and sends it to all registered devices', async () => {
     await service.publish({
       userId: 'patient-uid',
-      type: 'proposal_received',
+      type: NotificationType.PROPOSAL_RECEIVED,
       title: 'Nouvelle proposition',
       body: 'Un médecin a répondu à votre demande.',
       targetUrl: '/patient/demandes/need-123',

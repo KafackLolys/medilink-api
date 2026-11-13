@@ -108,7 +108,7 @@ describe('NeedsService', () => {
     process.env.SUPABASE_URL = 'https://project.supabase.co';
     process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
     process.env.SUPABASE_STORAGE_BUCKET = 'medical-files';
-    globalThis.fetch = jest.fn<typeof fetch>().mockResolvedValue(
+    globalThis.fetch = jest.fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>().mockResolvedValue(
       new Response(JSON.stringify({}), { status: 200 }),
     );
     service = new NeedsService({

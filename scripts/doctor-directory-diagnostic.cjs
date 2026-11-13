@@ -16,8 +16,9 @@ async function run() {
   const i = args.indexOf('--uid');
   const uid = i >= 0 ? args[i + 1] : null;
   const repair = args.includes('--repair');
-  if (!uid || typeof uid !== 'string' || uid.startsWith('--') || args.some((arg) => arg.startsWith('--') && !['--uid', '--repair'].includes(arg))) {
-    console.error('Usage: node scripts/doctor-directory-diagnostic.cjs --uid FIREBASE_UID [--repair]');
+  const acknowledged = args.includes('--confirm-production');
+  if (!uid || typeof uid !== 'string' || !/^[A-Za-z0-9_-]{10,128}$/.test(uid) || uid.startsWith('--') || args.some((arg) => arg.startsWith('--') && !['--uid', '--repair', '--confirm-production'].includes(arg))) {
+    console.error('Usage: node scripts/doctor-directory-diagnostic.cjs --uid FIREBASE_UID [--repair --confirm-production]');
     process.exitCode = 2;
     return;
   }
@@ -47,7 +48,7 @@ async function run() {
   if (profiles.length === 0) issues.push('Aucun doctorProfiles avec userId = UID.');
   if (profiles.length > 1) issues.push('Plusieurs doctorProfiles avec le même userId.');
   if (profile && profile.verificationStatus !== 'verified') issues.push('doctorProfiles.verificationStatus ne vaut pas verified.');
-  if (user && user.status !== 'active') issues.push('users.status ne vaut pas active.');
+  if (user && user.status !== 'active') issues.push(user.status === 'verified' ? "users.status='verified' est invalide : seule la validation du PROFIL doit être 'verified'." : 'users.status ne vaut pas active.');
   if (!zoneSnap.exists) issues.push('Aucune zone doctorServiceAreaSettings ; filtre ville limité à professionalAddress.');
   if (!zone?.city && !profile?.professionalAddress) issues.push('Aucune ville/zone professionnelle renseignée.');
 
@@ -62,24 +63,26 @@ async function run() {
     },
     serviceArea: { exists: zoneSnap.exists, city: zone?.city ?? null, districtsCount: Array.isArray(zone?.districts) ? zone.districts.length : 0 },
     eligibleWithoutFilters: Boolean(user?.role === 'doctor' && user?.status === 'active' && profile?.verificationStatus === 'verified' && profiles.length === 1),
+    repairable: Boolean(user?.role === 'doctor' && ['pending', 'verified'].includes(user.status) && profile?.verificationStatus === 'verified' && profiles.length === 1),
     issues,
   }, null, 2));
 
   if (!repair) return;
-  if (!(user?.role === 'doctor' && user.status === 'pending' && profile?.verificationStatus === 'verified' && profiles.length === 1)) {
-    throw new Error('Repair refused: only an already verified doctor with a pending account can be activated.');
+  if (!acknowledged) throw new Error('Repair requires --repair --confirm-production after reviewing the dry-run.');
+  if (!(user?.role === 'doctor' && ['pending', 'verified'].includes(user.status) && profile?.verificationStatus === 'verified' && profiles.length === 1)) {
+    throw new Error('Repair refused: doctor must have pending/legacy verified account and a verified professional profile.');
   }
   await db.runTransaction(async (tx) => {
     const [currentUser, currentProfile] = await Promise.all([
       tx.get(userRef),
       tx.get(profileSnap.docs[0].ref),
     ]);
-    if (!currentUser.exists || currentUser.data()?.status !== 'pending' || currentUser.data()?.role !== 'doctor'
+    if (!currentUser.exists || !['pending', 'verified'].includes(currentUser.data()?.status) || currentUser.data()?.role !== 'doctor'
       || !currentProfile.exists || currentProfile.data()?.verificationStatus !== 'verified') {
       throw new Error('Account changed since inspection; repair aborted.');
     }
     tx.update(userRef, { status: 'active', updatedAt: new Date() });
   });
-  console.log('Repair completed: pending -> active (professional verification already verified).');
+  console.log('Repair completed: invalid/pending users.status -> active. Professional verification remains verified.');
 }
 run().catch((err) => { console.error(err?.message ?? err); process.exitCode = 1; });
