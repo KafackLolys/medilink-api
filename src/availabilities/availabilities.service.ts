@@ -11,6 +11,7 @@ import {
   AccountRole,
   AccountStatus,
   AppointmentStatus,
+  ConsultationMode,
   type Appointment,
   type DoctorBlockedDate,
   type DoctorProfile,
@@ -115,6 +116,40 @@ export class AvailabilitiesService {
       throw new NotFoundException('Profil médecin introuvable');
     }
     return doctorDocument.id;
+  }
+
+  /** Saved consultation modes, never inferred from weekly availability. */
+  async getModes(uid: string): Promise<ConsultationMode[]> {
+    const doctorProfileId = await this.resolveDoctorProfileId(uid);
+    const snapshot = await this.firebase.getFirestore()
+      .collection('doctorConsultationModes')
+      .where('doctorProfileId', '==', doctorProfileId)
+      .get();
+    const configured = new Set(snapshot.docs.map((doc) => doc.data().mode));
+    return [ConsultationMode.HOME, ConsultationMode.TELECONSULTATION]
+      .filter((mode) => configured.has(mode));
+  }
+
+  /** Atomically replace the doctor's selected modes with 1 or 2 choices. */
+  async setModes(uid: string, requestedModes: unknown): Promise<ConsultationMode[]> {
+    if (!Array.isArray(requestedModes) || requestedModes.length < 1 || requestedModes.length > 2 ||
+        requestedModes.some((mode: unknown) => mode !== ConsultationMode.HOME && mode !== ConsultationMode.TELECONSULTATION) ||
+        new Set(requestedModes).size !== requestedModes.length) {
+      throw new BadRequestException('Choisissez un ou deux modes de consultation valides.');
+    }
+    const doctorProfileId = await this.resolveDoctorProfileId(uid);
+    const firestore = this.firebase.getFirestore();
+    const collection = firestore.collection('doctorConsultationModes');
+    const existing = await collection.where('doctorProfileId', '==', doctorProfileId).get();
+    const now = new Date();
+    const batch = firestore.batch();
+    for (const document of existing.docs) batch.delete(document.ref);
+    for (const mode of requestedModes as ConsultationMode[]) {
+      const ref = collection.doc();
+      batch.set(ref, { id: ref.id, doctorProfileId, mode, createdAt: now, updatedAt: now });
+    }
+    await batch.commit();
+    return this.getModes(uid);
   }
 
   async getDuration(uid: string): Promise<{ durationMinutes: number }> {

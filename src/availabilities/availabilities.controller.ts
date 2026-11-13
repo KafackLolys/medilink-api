@@ -23,6 +23,16 @@ import {
 export class AvailabilitiesController {
   constructor(private readonly availabilities: AvailabilitiesService) {}
 
+  @Get('me/modes')
+  getModes(@Req() request: AuthenticatedRequest) {
+    return this.availabilities.getModes(request.firebaseUser.uid);
+  }
+
+  @Put('me/modes')
+  setModes(@Req() request: AuthenticatedRequest, @Body() body: { modes?: unknown }) {
+    return this.availabilities.setModes(request.firebaseUser.uid, body?.modes);
+  }
+
   @Get('me/duration')
   getDuration(@Req() request: AuthenticatedRequest) {
     return this.availabilities.getDuration(request.firebaseUser.uid);
