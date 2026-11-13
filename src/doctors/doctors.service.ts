@@ -631,7 +631,7 @@ export class DoctorsService {
     );
 
     const doctors = profiles
-      .filter((doctor): doctor is DoctorDirectoryItem => doctor !== null)
+      .filter((doctor) => doctor !== null)
       .filter((doctor) => matchesDoctorSearch(doctor, {
         q: query,
         specialty: specialtyFilter,
@@ -644,7 +644,7 @@ export class DoctorsService {
       specialties: [
         ...new Set(
           profiles
-            .filter((doctor): doctor is DoctorDirectoryItem => doctor !== null)
+            .filter((doctor) => doctor !== null)
             .map((doctor) => doctor.specialty)
             .filter((specialty) => specialty !== 'Spécialité non renseignée'),
         ),
