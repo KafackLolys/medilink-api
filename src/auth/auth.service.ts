@@ -46,6 +46,12 @@ export interface ResetPasswordRequest {
   email: string;
 }
 
+export interface UpdateAdminProfileRequest {
+  firstName: string;
+  lastName: string;
+  phone: string;
+}
+
 export interface AuthProfile {
   id: string;
   firstName: string;
@@ -385,6 +391,33 @@ export class AuthService {
         address: null,
       },
     };
+  }
+
+  async updateAdminProfile(uid: string, body: UpdateAdminProfileRequest): Promise<{ user: AuthProfile }> {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new BadRequestException('Profile data is required');
+    }
+    const firstName = this.requireText(body.firstName, 'firstName');
+    const lastName = this.requireText(body.lastName, 'lastName');
+    const phone = this.requireText(body.phone, 'phone');
+    if (firstName.length > 80 || lastName.length > 80 || phone.length > 30) {
+      throw new BadRequestException('Profile fields exceed maximum length');
+    }
+    if (!/^[+0-9() .-]{6,30}$/.test(phone)) {
+      throw new BadRequestException('Invalid phone number');
+    }
+    const ref = this.firebase.getFirestore().collection('users').doc(uid);
+    await this.firebase.getFirestore().runTransaction(async transaction => {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists) throw new NotFoundException('Account not found');
+      const user = snapshot.data() as User;
+      if (user.role !== AccountRole.ADMIN || user.status !== AccountStatus.ACTIVE) {
+        throw new ForbiddenException('Only an active administrator can edit this profile');
+      }
+      transaction.update(ref, { firstName, lastName, phone, updatedAt: new Date() });
+    });
+    const updated = await this.getStoredUser(uid);
+    return { user: this.toProfile(updated) };
   }
 
   async logout(firebaseUser: DecodedIdToken): Promise<{ message: string }> {

@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Patch,
   Post,
   Req,
   UseGuards,
@@ -14,6 +15,7 @@ import {
   type RefreshRequest,
   type RegisterUserRequest,
   type ResetPasswordRequest,
+  type UpdateAdminProfileRequest,
 } from './auth.service';
 import type { AuthenticatedRequest } from './authenticated-request.interface';
 import { FirebaseAuthGuard } from './firebase-auth.guard';
@@ -49,6 +51,15 @@ export class AuthController {
   @UseGuards(FirebaseAuthGuard)
   getProfile(@Req() request: AuthenticatedRequest) {
     return this.authService.getProfile(request.firebaseUser);
+  }
+
+  @Patch('admin/profile')
+  @UseGuards(FirebaseAuthGuard)
+  updateAdminProfile(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: UpdateAdminProfileRequest,
+  ) {
+    return this.authService.updateAdminProfile(request.firebaseUser.uid, body);
   }
 
   @Post('logout')
