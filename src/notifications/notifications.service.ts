@@ -274,6 +274,15 @@ export class NotificationsService {
           title: notification.title,
           body: notification.body,
         },
+        // Firebase Admin talks directly to FCM (not Expo Push Service).
+        // Android must use the same channel as expo-notifications on device.
+        android: {
+          priority: 'high',
+          notification: {
+            channelId: 'medilink-alerts-v2',
+            sound: 'default',
+          },
+        },
         data: {
           notificationId: id,
           type: notification.type,
