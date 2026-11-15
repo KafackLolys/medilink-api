@@ -296,7 +296,7 @@ export class NotificationsService {
         acceptedByFcm += response.successCount;
         rejectedByFcm += response.failureCount;
         await this.removeInvalidTokens(chunk, response.responses);
-      } catch (error) {
+      } catch {
         rejectedByFcm += chunk.length;
         // Never log tokens or private notification contents.
         this.logger.warn('FCM test request failed for authenticated mobile user');
@@ -363,8 +363,17 @@ export class NotificationsService {
           await this.firebase.getMessaging().sendEachForMulticast(message);
         await this.removeInvalidTokens(chunk, response.responses);
         if (response.failureCount > 0) {
+          const failures = new Map<string, number>();
+          for (const result of response.responses) {
+            if (!result.success) {
+              const reason = result.error?.code ?? 'unknown';
+              failures.set(reason, (failures.get(reason) ?? 0) + 1);
+            }
+          }
+          // Error codes help distinguish invalid tokens, sender mismatch and
+          // disabled FCM APIs, without logging any tokens or message contents.
           this.logger.warn(
-            `FCM delivery failed for ${response.failureCount} device(s) on notification ${id}`,
+            `FCM failures (${response.failureCount} device(s)): ${JSON.stringify(Object.fromEntries(failures))}`,
           );
         }
       } catch (error) {
