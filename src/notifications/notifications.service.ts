@@ -2,6 +2,8 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  HttpException,
+  HttpStatus,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
@@ -236,6 +238,73 @@ export class NotificationsService {
     return { removed: true };
   }
 
+  /**
+   * Restricted FCM diagnostics: no patient content, no user-supplied destination,
+   * no token disclosure and a shared Firestore cooldown across serverless instances.
+   * Acceptance by FCM is not proof of OS-level delivery.
+   */
+  async testMobilePush(firebaseUser: DecodedIdToken): Promise<{
+    registeredDevices: number;
+    acceptedByFcm: number;
+    rejectedByFcm: number;
+  }> {
+    const firestore = this.firebase.getFirestore();
+    const devices = await firestore.collection('notificationDevices')
+      .where('userId', '==', firebaseUser.uid).get();
+    const tokens = [...new Set(devices.docs
+      .map(doc => doc.data())
+      .filter(data => data.platform === 'mobile')
+      .map(data => data.token)
+      .filter((token): token is string => typeof token === 'string' && token.length >= 20))];
+    if (tokens.length === 0) {
+      throw new BadRequestException(
+        'Aucun appareil Android enregistré. Activez les notifications sur le téléphone.',
+      );
+    }
+
+    const cooldown = firestore.collection('notificationPushTestLimits').doc(firebaseUser.uid);
+    const now = new Date();
+    await firestore.runTransaction(async transaction => {
+      const previous = await transaction.get(cooldown);
+      const lastTest = toDate(previous.data()?.lastSentAt);
+      if (lastTest && now.getTime() - lastTest.getTime() < 60_000) {
+        throw new HttpException(
+          'Veuillez attendre une minute avant de relancer un test push.',
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+      transaction.set(cooldown, { lastSentAt: now }, { merge: true });
+    });
+
+    let acceptedByFcm = 0;
+    let rejectedByFcm = 0;
+    for (let offset = 0; offset < tokens.length; offset += 500) {
+      const chunk = tokens.slice(offset, offset + 500);
+      try {
+        const response = await this.firebase.getMessaging().sendEachForMulticast({
+          tokens: chunk,
+          notification: {
+            title: 'MediLink · Test de notification',
+            body: 'Si vous voyez cette alerte, les notifications push sont opérationnelles.',
+          },
+          android: {
+            priority: 'high',
+            notification: { channelId: 'medilink-alerts-v2', sound: 'default' },
+          },
+          data: { type: 'system', test: 'true' },
+        });
+        acceptedByFcm += response.successCount;
+        rejectedByFcm += response.failureCount;
+        await this.removeInvalidTokens(chunk, response.responses);
+      } catch {
+        rejectedByFcm += chunk.length;
+        // Never log tokens or private notification contents.
+        this.logger.warn('FCM test request failed for authenticated mobile user');
+      }
+    }
+    return { registeredDevices: tokens.length, acceptedByFcm, rejectedByFcm };
+  }
+
   async publish(notification: PublishNotification): Promise<void> {
     const id = randomUUID();
     const now = new Date();
@@ -274,6 +343,15 @@ export class NotificationsService {
           title: notification.title,
           body: notification.body,
         },
+        // Firebase Admin talks directly to FCM (not Expo Push Service).
+        // Android must use the same channel as expo-notifications on device.
+        android: {
+          priority: 'high',
+          notification: {
+            channelId: 'medilink-alerts-v2',
+            sound: 'default',
+          },
+        },
         data: {
           notificationId: id,
           type: notification.type,
@@ -285,8 +363,17 @@ export class NotificationsService {
           await this.firebase.getMessaging().sendEachForMulticast(message);
         await this.removeInvalidTokens(chunk, response.responses);
         if (response.failureCount > 0) {
+          const failures = new Map<string, number>();
+          for (const result of response.responses) {
+            if (!result.success) {
+              const reason = result.error?.code ?? 'unknown';
+              failures.set(reason, (failures.get(reason) ?? 0) + 1);
+            }
+          }
+          // Error codes help distinguish invalid tokens, sender mismatch and
+          // disabled FCM APIs, without logging any tokens or message contents.
           this.logger.warn(
-            `FCM delivery failed for ${response.failureCount} device(s) on notification ${id}`,
+            `FCM failures (${response.failureCount} device(s)): ${JSON.stringify(Object.fromEntries(failures))}`,
           );
         }
       } catch (error) {

@@ -43,6 +43,13 @@ export class NotificationsController {
     return this.notifications.markRead(request.firebaseUser, id);
   }
 
+  // Sends a generic FCM test ONLY to Android devices registered for this UID.
+  // Protected by FirebaseAuthGuard; server-side rate-limited to avoid abuse.
+  @Post('test-push')
+  testPush(@Req() request: AuthenticatedRequest) {
+    return this.notifications.testMobilePush(request.firebaseUser);
+  }
+
   @Post('devices')
   registerDevice(
     @Req() request: AuthenticatedRequest,
