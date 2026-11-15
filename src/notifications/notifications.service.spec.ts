@@ -9,14 +9,17 @@ describe('NotificationsService', () => {
   const updateNotification = jest.fn();
   const sendEachForMulticast = jest.fn();
   const getDevices = jest.fn();
+  const transactionGet = jest.fn().mockResolvedValue({ data: () => undefined });
+  const transactionSet = jest.fn();
   let service: NotificationsService;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    transactionGet.mockResolvedValue({ data: () => undefined });
     getDevices.mockResolvedValue({
       docs: [
-        { data: () => ({ token: 'fcm-token-device-one' }) },
-        { data: () => ({ token: 'fcm-token-device-two' }) },
+        { data: () => ({ token: 'fcm-token-device-one', platform: 'mobile' }) },
+        { data: () => ({ token: 'fcm-token-device-two', platform: 'mobile' }) },
       ],
     });
     sendEachForMulticast.mockResolvedValue({
@@ -25,7 +28,14 @@ describe('NotificationsService', () => {
       responses: [{ success: true }, { success: true }],
     });
     const firestore = {
+      runTransaction: async (run: (transaction: {
+        get: typeof transactionGet;
+        set: typeof transactionSet;
+      }) => Promise<unknown>) => run({ get: transactionGet, set: transactionSet }),
       collection: (name: string) => {
+        if (name === 'notificationPushTestLimits') {
+          return { doc: () => ({ id: 'cooldown-reference' }) };
+        }
         if (name === 'notifications') {
           return {
             doc: () => ({
@@ -76,6 +86,35 @@ describe('NotificationsService', () => {
         },
       }),
     );
+  });
+
+  it('sends an authenticated push test with safe content to Android FCM tokens', async () => {
+    const response = await service.testMobilePush({ uid: 'patient-uid' } as never);
+    expect(response).toEqual({
+      registeredDevices: 2,
+      acceptedByFcm: 2,
+      rejectedByFcm: 0,
+    });
+    expect(transactionSet).toHaveBeenCalledTimes(1);
+    expect(sendEachForMulticast).toHaveBeenCalledWith(expect.objectContaining({
+      tokens: ['fcm-token-device-one', 'fcm-token-device-two'],
+      notification: expect.objectContaining({ title: 'MediLink · Test de notification' }),
+      android: {
+        priority: 'high',
+        notification: { channelId: 'medilink-alerts-v2', sound: 'default' },
+      },
+      data: { type: 'system', test: 'true' },
+    }));
+  });
+
+  it('throttles repeated push tests for one authenticated user', async () => {
+    transactionGet.mockResolvedValue({
+      data: () => ({ lastSentAt: new Date() }),
+    });
+    await expect(
+      service.testMobilePush({ uid: 'patient-uid' } as never),
+    ).rejects.toMatchObject({ status: 429 });
+    expect(sendEachForMulticast).not.toHaveBeenCalled();
   });
 
   it('does not allow a user to mark another user’s notification as read', async () => {
