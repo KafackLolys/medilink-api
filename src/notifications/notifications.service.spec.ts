@@ -67,6 +67,13 @@ describe('NotificationsService', () => {
     expect(sendEachForMulticast).toHaveBeenCalledWith(
       expect.objectContaining({
         tokens: ['fcm-token-device-one', 'fcm-token-device-two'],
+        android: {
+          priority: 'high',
+          notification: {
+            channelId: 'medilink-alerts-v2',
+            sound: 'default',
+          },
+        },
       }),
     );
   });
