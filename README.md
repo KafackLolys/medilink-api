@@ -59,6 +59,17 @@ $ npm run test:cov
 
 ## Firebase Authentication
 
+### API V2 routes
+
+Copied V2 endpoints are exposed alongside the original endpoints. Their `v2`
+segment follows each controller's base path (for example, `POST /auth/v2/login`,
+`GET /needs/v2`, and `GET /admin/v2/accounts`). Original routes such as
+`POST /auth/login` and `GET /needs` remain available. V2 controller handlers
+call their corresponding V2 service methods; the V2 routes cover authentication,
+public and authenticated doctors, needs, appointments, availability, messages,
+notifications, patients, integration, administration, and the root health
+response.
+
 Authentication operations run through the NestJS API. The client sends
 registration credentials (`firstName`, `lastName`, `phone`, `role`, `email`,
 `password`, and optional doctor `specialty` / `registrationNumber`) to

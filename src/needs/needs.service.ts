@@ -274,20 +274,18 @@ export class NeedsService {
         }),
       )
     ).filter((need): need is MedicalNeed => need !== null);
-    const specialties = [...new Set(availableNeeds.map((need) => need.specialty))]
+    const specialties = [
+      ...new Set(availableNeeds.map((need) => need.specialty)),
+    ]
       .filter(Boolean)
       .sort((left, right) => left.localeCompare(right, 'fr'));
     const filtered = availableNeeds
       .filter(
         (need) =>
-          !filters.specialty ||
-          need.specialty === filters.specialty.trim(),
+          !filters.specialty || need.specialty === filters.specialty.trim(),
       )
       .filter((need) => !filters.priority || need.priority === filters.priority)
-      .filter(
-        (need) =>
-          !filters.mode || need.consultationMode === filters.mode,
-      )
+      .filter((need) => !filters.mode || need.consultationMode === filters.mode)
       .filter((need) => {
         if (!search) return true;
         return [
@@ -306,18 +304,35 @@ export class NeedsService {
     const offset = (page - 1) * pageSize;
     const pageNeeds = filtered.slice(offset, offset + pageSize);
     const [districtSnapshot, citySnapshot] = await Promise.all([
-      firestore.collection('districts').get(), firestore.collection('cities').get(),
+      firestore.collection('districts').get(),
+      firestore.collection('cities').get(),
     ]);
-    const cities = new Map(citySnapshot.docs.map(doc => [doc.id, doc.data().name?.trim().toLowerCase()]));
+    const cities = new Map(
+      citySnapshot.docs.map((doc) => [
+        doc.id,
+        doc.data().name?.trim().toLowerCase(),
+      ]),
+    );
     const centers = new Map<string, { latitude: number; longitude: number }>();
     for (const doc of districtSnapshot.docs) {
       const area = doc.data();
       const city = cities.get(area.cityId);
       const lat = area.centerLatitude;
       const lon = area.centerLongitude;
-      if (city && typeof area.name === 'string' && typeof lat === 'number' && typeof lon === 'number' &&
-          Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
-        centers.set(`${city}::${area.name.trim().toLowerCase()}`, { latitude: lat, longitude: lon });
+      if (
+        city &&
+        typeof area.name === 'string' &&
+        typeof lat === 'number' &&
+        typeof lon === 'number' &&
+        Number.isFinite(lat) &&
+        Number.isFinite(lon) &&
+        Math.abs(lat) <= 90 &&
+        Math.abs(lon) <= 180
+      ) {
+        centers.set(`${city}::${area.name.trim().toLowerCase()}`, {
+          latitude: lat,
+          longitude: lon,
+        });
       }
     }
     const items = pageNeeds.map((need) => ({
@@ -336,7 +351,10 @@ export class NeedsService {
         ? dateFromFirestore(need.availableFrom).toISOString()
         : null,
       documentsCount: need.attachments?.length ?? 0,
-      publicLocation: centers.get(`${need.city.trim().toLowerCase()}::${need.district.trim().toLowerCase()}`) ?? null,
+      publicLocation:
+        centers.get(
+          `${need.city.trim().toLowerCase()}::${need.district.trim().toLowerCase()}`,
+        ) ?? null,
     }));
 
     return {
@@ -473,7 +491,9 @@ export class NeedsService {
       status: ProposalStatus.PENDING,
       message: [
         proposal.message,
-        proposal.details?.trim() ? `Informations complémentaires : ${proposal.details.trim()}` : '',
+        proposal.details?.trim()
+          ? `Informations complémentaires : ${proposal.details.trim()}`
+          : '',
       ]
         .filter(Boolean)
         .join('\n\n'),
@@ -704,125 +724,244 @@ export class NeedsService {
     needId: string,
   ): Promise<{ items: PatientProposalView[] }> {
     const firestore = this.firebase.getFirestore();
-    const needSnapshot = await firestore.collection('medicalNeeds').doc(needId).get();
-    if (!needSnapshot.exists) throw new NotFoundException('Medical need not found');
+    const needSnapshot = await firestore
+      .collection('medicalNeeds')
+      .doc(needId)
+      .get();
+    if (!needSnapshot.exists)
+      throw new NotFoundException('Medical need not found');
     this.assertOwner(needSnapshot.data() as MedicalNeed, firebaseUser.uid);
-    const snapshot = await firestore.collection('doctorProposals').where('needId', '==', needId).get();
-    const items = await Promise.all(snapshot.docs.map(async (document) => {
-      const proposal = document.data() as DoctorProposal;
-      const doctorSnapshot = await firestore.collection('doctorProfiles').doc(proposal.doctorProfileId).get();
-      if (!doctorSnapshot.exists) return null;
-      const doctor = doctorSnapshot.data() as DoctorProfile;
-      if (doctor.verificationStatus !== DoctorVerificationStatus.VERIFIED) return null;
-      const userSnapshot = await firestore.collection('users').doc(doctor.userId).get();
-      if (!userSnapshot.exists) return null;
-      const user = userSnapshot.data() as User;
-      if (user.role !== AccountRole.DOCTOR) return null;
-      return {
-        id: proposal.id || document.id,
-        status: proposal.status,
-        doctor: {
-          id: doctorSnapshot.id,
-          name: doctor.fullName?.trim() || `${user.firstName} ${user.lastName}`.trim(),
-          specialty: user.specialty?.trim() || 'Médecine générale',
-        },
-        conversationId: createHash('sha256')
-          .update(`${firebaseUser.uid}:${doctorSnapshot.id}`).digest('hex'),
-        message: proposal.message,
-        proposedAt: dateFromFirestore(proposal.proposedAt).toISOString(),
-        proposedAppointmentAt: proposal.proposedAppointmentAt
-          ? dateFromFirestore(proposal.proposedAppointmentAt).toISOString() : null,
-        consultationMode: proposal.consultationMode,
-        fee: proposal.fee,
-        currency: proposal.currency || 'XAF',
-      } satisfies PatientProposalView;
-    }));
+    const snapshot = await firestore
+      .collection('doctorProposals')
+      .where('needId', '==', needId)
+      .get();
+    const items = await Promise.all(
+      snapshot.docs.map(async (document) => {
+        const proposal = document.data() as DoctorProposal;
+        const doctorSnapshot = await firestore
+          .collection('doctorProfiles')
+          .doc(proposal.doctorProfileId)
+          .get();
+        if (!doctorSnapshot.exists) return null;
+        const doctor = doctorSnapshot.data() as DoctorProfile;
+        if (doctor.verificationStatus !== DoctorVerificationStatus.VERIFIED)
+          return null;
+        const userSnapshot = await firestore
+          .collection('users')
+          .doc(doctor.userId)
+          .get();
+        if (!userSnapshot.exists) return null;
+        const user = userSnapshot.data() as User;
+        if (user.role !== AccountRole.DOCTOR) return null;
+        return {
+          id: proposal.id || document.id,
+          status: proposal.status,
+          doctor: {
+            id: doctorSnapshot.id,
+            name:
+              doctor.fullName?.trim() ||
+              `${user.firstName} ${user.lastName}`.trim(),
+            specialty: user.specialty?.trim() || 'Médecine générale',
+          },
+          conversationId: createHash('sha256')
+            .update(`${firebaseUser.uid}:${doctorSnapshot.id}`)
+            .digest('hex'),
+          message: proposal.message,
+          proposedAt: dateFromFirestore(proposal.proposedAt).toISOString(),
+          proposedAppointmentAt: proposal.proposedAppointmentAt
+            ? dateFromFirestore(proposal.proposedAppointmentAt).toISOString()
+            : null,
+          consultationMode: proposal.consultationMode,
+          fee: proposal.fee,
+          currency: proposal.currency || 'XAF',
+        } satisfies PatientProposalView;
+      }),
+    );
     return {
-      items: items.filter((item): item is PatientProposalView => item !== null)
+      items: items
+        .filter((item): item is PatientProposalView => item !== null)
         .sort((a, b) => Date.parse(b.proposedAt) - Date.parse(a.proposedAt)),
     };
   }
 
   async acceptPatientProposal(
-    firebaseUser: DecodedIdToken, needId: string, proposalId: string,
+    firebaseUser: DecodedIdToken,
+    needId: string,
+    proposalId: string,
   ): Promise<{ proposalId: string; appointmentId: string }> {
     const db = this.firebase.getFirestore();
     const needRef = db.collection('medicalNeeds').doc(needId);
     const proposalRef = db.collection('doctorProposals').doc(proposalId);
     const preflightProposal = await proposalRef.get();
-    if (!preflightProposal.exists || preflightProposal.data()?.needId !== needId) {
+    if (
+      !preflightProposal.exists ||
+      preflightProposal.data()?.needId !== needId
+    ) {
       throw new NotFoundException('Proposal not found for this request');
     }
-    const doctorProfileId = (preflightProposal.data() as DoctorProposal).doctorProfileId;
+    const doctorProfileId = (preflightProposal.data() as DoctorProposal)
+      .doctorProfileId;
     const doctorRef = db.collection('doctorProfiles').doc(doctorProfileId);
     const preflightDoctor = await doctorRef.get();
-    if (!preflightDoctor.exists) throw new NotFoundException('Doctor not found');
-    const doctorUserRef = db.collection('users').doc((preflightDoctor.data() as DoctorProfile).userId);
+    if (!preflightDoctor.exists)
+      throw new NotFoundException('Doctor not found');
+    const doctorUserRef = db
+      .collection('users')
+      .doc((preflightDoctor.data() as DoctorProfile).userId);
     const appointmentRef = db.collection('appointments').doc();
     const patientRef = db.collection('patients').doc(firebaseUser.uid);
-    const allProposalsQuery = db.collection('doctorProposals').where('needId', '==', needId);
-    const appointmentsQuery = db.collection('appointments').where('doctorProfileId', '==', doctorProfileId);
-    const modesQuery = db.collection('doctorConsultationModes').where('doctorProfileId', '==', doctorProfileId);
-    const weeklyQuery = db.collection('doctorWeeklyAvailabilities').where('doctorProfileId', '==', doctorProfileId);
-    const blockedQuery = db.collection('doctorBlockedDates').where('doctorProfileId', '==', doctorProfileId);
-    const addressesQuery = db.collection('addresses').where('userId', '==', firebaseUser.uid);
+    const allProposalsQuery = db
+      .collection('doctorProposals')
+      .where('needId', '==', needId);
+    const appointmentsQuery = db
+      .collection('appointments')
+      .where('doctorProfileId', '==', doctorProfileId);
+    const modesQuery = db
+      .collection('doctorConsultationModes')
+      .where('doctorProfileId', '==', doctorProfileId);
+    const weeklyQuery = db
+      .collection('doctorWeeklyAvailabilities')
+      .where('doctorProfileId', '==', doctorProfileId);
+    const blockedQuery = db
+      .collection('doctorBlockedDates')
+      .where('doctorProfileId', '==', doctorProfileId);
+    const addressesQuery = db
+      .collection('addresses')
+      .where('userId', '==', firebaseUser.uid);
     const now = new Date();
 
     const result = await db.runTransaction(async (tx) => {
       // Firestore transaction: read everything first, then write atomically.
-      const [needSnapshot, proposalSnapshot, doctorSnapshot, doctorUserSnapshot,
-        patientSnapshot, allProposals, appointmentsSnapshot, modesSnapshot,
-        weeklySnapshot, blockedSnapshot, addressesSnapshot] = await Promise.all([
-        tx.get(needRef), tx.get(proposalRef), tx.get(doctorRef), tx.get(doctorUserRef),
-        tx.get(patientRef), tx.get(allProposalsQuery), tx.get(appointmentsQuery),
-        tx.get(modesQuery), tx.get(weeklyQuery), tx.get(blockedQuery), tx.get(addressesQuery),
+      const [
+        needSnapshot,
+        proposalSnapshot,
+        doctorSnapshot,
+        doctorUserSnapshot,
+        patientSnapshot,
+        allProposals,
+        appointmentsSnapshot,
+        modesSnapshot,
+        weeklySnapshot,
+        blockedSnapshot,
+        addressesSnapshot,
+      ] = await Promise.all([
+        tx.get(needRef),
+        tx.get(proposalRef),
+        tx.get(doctorRef),
+        tx.get(doctorUserRef),
+        tx.get(patientRef),
+        tx.get(allProposalsQuery),
+        tx.get(appointmentsQuery),
+        tx.get(modesQuery),
+        tx.get(weeklyQuery),
+        tx.get(blockedQuery),
+        tx.get(addressesQuery),
       ]);
-      if (!needSnapshot.exists) throw new NotFoundException('Demande médicale introuvable');
+      if (!needSnapshot.exists)
+        throw new NotFoundException('Demande médicale introuvable');
       const need = needSnapshot.data() as MedicalNeed;
       this.assertOwner(need, firebaseUser.uid);
-      if (![NeedStatus.PUBLISHED, NeedStatus.AWAITING_PROPOSALS, NeedStatus.PROPOSALS_RECEIVED].includes(need.status)) {
-        throw new ConflictException('Un médecin a déjà été sélectionné ou cette demande est fermée');
+      if (
+        ![
+          NeedStatus.PUBLISHED,
+          NeedStatus.AWAITING_PROPOSALS,
+          NeedStatus.PROPOSALS_RECEIVED,
+        ].includes(need.status)
+      ) {
+        throw new ConflictException(
+          'Un médecin a déjà été sélectionné ou cette demande est fermée',
+        );
       }
-      if (!proposalSnapshot.exists) throw new NotFoundException('Proposition introuvable');
+      if (!proposalSnapshot.exists)
+        throw new NotFoundException('Proposition introuvable');
       const proposal = proposalSnapshot.data() as DoctorProposal;
-      if (proposal.needId !== needId || proposal.doctorProfileId !== doctorProfileId ||
-          ![ProposalStatus.PENDING, ProposalStatus.SENT].includes(proposal.status)) {
-        throw new ConflictException('Cette proposition ne peut plus être acceptée');
+      if (
+        proposal.needId !== needId ||
+        proposal.doctorProfileId !== doctorProfileId ||
+        ![ProposalStatus.PENDING, ProposalStatus.SENT].includes(proposal.status)
+      ) {
+        throw new ConflictException(
+          'Cette proposition ne peut plus être acceptée',
+        );
       }
-      if (allProposals.docs.some((doc) => doc.id !== proposalId && doc.data().status === ProposalStatus.ACCEPTED)) {
-        throw new ConflictException('Une autre proposition a déjà été acceptée');
+      if (
+        allProposals.docs.some(
+          (doc) =>
+            doc.id !== proposalId &&
+            doc.data().status === ProposalStatus.ACCEPTED,
+        )
+      ) {
+        throw new ConflictException(
+          'Une autre proposition a déjà été acceptée',
+        );
       }
       if (!doctorSnapshot.exists || !doctorUserSnapshot.exists) {
         throw new NotFoundException('Médecin introuvable');
       }
       const doctor = doctorSnapshot.data() as DoctorProfile;
       const doctorUser = doctorUserSnapshot.data() as User;
-      if (doctor.verificationStatus !== DoctorVerificationStatus.VERIFIED ||
-          doctorUser.role !== AccountRole.DOCTOR || doctorUser.status !== AccountStatus.ACTIVE) {
-        throw new BadRequestException("Le médecin n'est pas disponible pour les rendez-vous");
+      if (
+        doctor.verificationStatus !== DoctorVerificationStatus.VERIFIED ||
+        doctorUser.role !== AccountRole.DOCTOR ||
+        doctorUser.status !== AccountStatus.ACTIVE
+      ) {
+        throw new BadRequestException(
+          "Le médecin n'est pas disponible pour les rendez-vous",
+        );
       }
       // The patient explicitly accepts the proposal's consultation mode, which
       // may differ from the initially requested mode. Only the doctor's actual
       // configured modes can authorize an appointment.
-      if (![ConsultationMode.HOME, ConsultationMode.TELECONSULTATION].includes(proposal.consultationMode)) {
-        throw new BadRequestException('Mode de consultation invalide dans la proposition');
+      if (
+        ![ConsultationMode.HOME, ConsultationMode.TELECONSULTATION].includes(
+          proposal.consultationMode,
+        )
+      ) {
+        throw new BadRequestException(
+          'Mode de consultation invalide dans la proposition',
+        );
       }
-      if (!modesSnapshot.docs.some((doc) => doc.data().mode === proposal.consultationMode)) {
-        throw new BadRequestException('Le médecin n\'a pas activé le mode de consultation proposé');
+      if (
+        !modesSnapshot.docs.some(
+          (doc) => doc.data().mode === proposal.consultationMode,
+        )
+      ) {
+        throw new BadRequestException(
+          "Le médecin n'a pas activé le mode de consultation proposé",
+        );
       }
-      if (!proposal.proposedAppointmentAt) throw new BadRequestException('La date de rendez-vous proposée est manquante');
+      if (!proposal.proposedAppointmentAt)
+        throw new BadRequestException(
+          'La date de rendez-vous proposée est manquante',
+        );
       const startsAt = dateFromFirestore(proposal.proposedAppointmentAt);
-      if (!Number.isFinite(startsAt.getTime()) || startsAt.getTime() <= Date.now()) {
-        throw new BadRequestException('Le rendez-vous proposé est dans le passé');
+      if (
+        !Number.isFinite(startsAt.getTime()) ||
+        startsAt.getTime() <= Date.now()
+      ) {
+        throw new BadRequestException(
+          'Le rendez-vous proposé est dans le passé',
+        );
       }
-      const duration = Number.isSafeInteger(doctor.defaultAppointmentDurationMinutes) &&
-        doctor.defaultAppointmentDurationMinutes > 0 ? doctor.defaultAppointmentDurationMinutes : 30;
+      const duration =
+        Number.isSafeInteger(doctor.defaultAppointmentDurationMinutes) &&
+        doctor.defaultAppointmentDurationMinutes > 0
+          ? doctor.defaultAppointmentDurationMinutes
+          : 30;
       const endsAt = new Date(startsAt.getTime() + duration * 60_000);
       const localParts = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'Africa/Douala', year: 'numeric', month: '2-digit', day: '2-digit',
-        weekday: 'long', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+        timeZone: 'Africa/Douala',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        weekday: 'long',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
       }).formatToParts(startsAt);
-      const local = Object.fromEntries(localParts.map(({ type, value }) => [type, value]));
+      const local = Object.fromEntries(
+        localParts.map(({ type, value }) => [type, value]),
+      );
       const weekday = local.weekday.toLowerCase();
       const day = `${local.year}-${local.month}-${local.day}`;
       const minutes = Number(local.hour) * 60 + Number(local.minute);
@@ -830,68 +969,135 @@ export class NeedsService {
         const slot = doc.data();
         const [sh, sm] = String(slot.startTime).split(':').map(Number);
         const [eh, em] = String(slot.endTime).split(':').map(Number);
-        return slot.isAvailable === true && slot.weekday === weekday &&
-          minutes >= sh * 60 + sm && minutes + duration <= eh * 60 + em;
+        return (
+          slot.isAvailable === true &&
+          slot.weekday === weekday &&
+          minutes >= sh * 60 + sm &&
+          minutes + duration <= eh * 60 + em
+        );
       });
-      if (!available) throw new BadRequestException("Le médecin n'est pas disponible à l'heure proposée");
+      if (!available)
+        throw new BadRequestException(
+          "Le médecin n'est pas disponible à l'heure proposée",
+        );
       const blocked = blockedSnapshot.docs.some((doc) => {
         const value = doc.data().date as Date | Timestamp;
         const parts = new Intl.DateTimeFormat('en-GB', {
-          timeZone: 'Africa/Douala', year: 'numeric', month: '2-digit', day: '2-digit',
+          timeZone: 'Africa/Douala',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
         }).formatToParts(dateFromFirestore(value));
-        const localDay = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+        const localDay = Object.fromEntries(
+          parts.map(({ type, value }) => [type, value]),
+        );
         return `${localDay.year}-${localDay.month}-${localDay.day}` === day;
       });
-      if (blocked) throw new BadRequestException('Le médecin est indisponible à la date proposée');
+      if (blocked)
+        throw new BadRequestException(
+          'Le médecin est indisponible à la date proposée',
+        );
       const conflict = appointmentsSnapshot.docs.some((doc) => {
         const old = doc.data();
-        if (![AppointmentStatus.CONFIRMED, AppointmentStatus.PENDING_CONFIRMATION].includes(old.status)) return false;
-        const oldStart = dateFromFirestore(old.scheduledAt as Date | Timestamp).getTime();
+        if (
+          ![
+            AppointmentStatus.CONFIRMED,
+            AppointmentStatus.PENDING_CONFIRMATION,
+          ].includes(old.status)
+        )
+          return false;
+        const oldStart = dateFromFirestore(
+          old.scheduledAt as Date | Timestamp,
+        ).getTime();
         const oldEnd = oldStart + (Number(old.durationMinutes) || 30) * 60_000;
         return startsAt.getTime() < oldEnd && endsAt.getTime() > oldStart;
       });
-      if (conflict) throw new ConflictException('Ce créneau de rendez-vous est déjà réservé');
-      const primaryAddress = addressesSnapshot.docs.find((doc) => doc.data().isPrimary === true);
-      if (proposal.consultationMode === ConsultationMode.HOME && !primaryAddress) {
-        throw new BadRequestException('Ajoutez une adresse principale avant d\'accepter une visite à domicile');
+      if (conflict)
+        throw new ConflictException(
+          'Ce créneau de rendez-vous est déjà réservé',
+        );
+      const primaryAddress = addressesSnapshot.docs.find(
+        (doc) => doc.data().isPrimary === true,
+      );
+      if (
+        proposal.consultationMode === ConsultationMode.HOME &&
+        !primaryAddress
+      ) {
+        throw new BadRequestException(
+          "Ajoutez une adresse principale avant d'accepter une visite à domicile",
+        );
       }
       tx.update(proposalRef, {
-        status: ProposalStatus.ACCEPTED, respondedAt: now,
-        patientResponse: 'Proposition acceptée', updatedAt: now,
+        status: ProposalStatus.ACCEPTED,
+        respondedAt: now,
+        patientResponse: 'Proposition acceptée',
+        updatedAt: now,
       });
       for (const doc of allProposals.docs) {
         if (doc.id === proposalId) continue;
-        if ([ProposalStatus.PENDING, ProposalStatus.SENT].includes(doc.data().status)) {
+        if (
+          [ProposalStatus.PENDING, ProposalStatus.SENT].includes(
+            doc.data().status,
+          )
+        ) {
           tx.update(doc.ref, {
             status: ProposalStatus.REJECTED,
             patientResponse: 'Une autre proposition a été acceptée',
-            respondedAt: now, updatedAt: now,
+            respondedAt: now,
+            updatedAt: now,
           });
         }
       }
-      tx.update(needRef, { status: NeedStatus.APPOINTMENT_CONFIRMED, consultationMode: proposal.consultationMode, updatedAt: now });
+      tx.update(needRef, {
+        status: NeedStatus.APPOINTMENT_CONFIRMED,
+        consultationMode: proposal.consultationMode,
+        updatedAt: now,
+      });
       tx.create(appointmentRef, {
         id: appointmentRef.id,
-        patientProfileId: patientSnapshot.exists ? (patientSnapshot.data()?.id ?? firebaseUser.uid) : firebaseUser.uid,
-        doctorProfileId, needId, proposalId, status: AppointmentStatus.CONFIRMED,
-        consultationMode: proposal.consultationMode, scheduledAt: startsAt,
-        durationMinutes: duration, fee: proposal.fee, currency: proposal.currency || 'XAF',
-        addressId: primaryAddress ? (primaryAddress.data().id ?? primaryAddress.id) : null,
-        cancellationReason: null, completedAt: null, createdAt: now, updatedAt: now,
+        patientProfileId: patientSnapshot.exists
+          ? (patientSnapshot.data()?.id ?? firebaseUser.uid)
+          : firebaseUser.uid,
+        doctorProfileId,
+        needId,
+        proposalId,
+        status: AppointmentStatus.CONFIRMED,
+        consultationMode: proposal.consultationMode,
+        scheduledAt: startsAt,
+        durationMinutes: duration,
+        fee: proposal.fee,
+        currency: proposal.currency || 'XAF',
+        addressId: primaryAddress
+          ? (primaryAddress.data().id ?? primaryAddress.id)
+          : null,
+        cancellationReason: null,
+        completedAt: null,
+        createdAt: now,
+        updatedAt: now,
       });
-      return { proposalId, appointmentId: appointmentRef.id, doctorUserId: doctor.userId };
+      return {
+        proposalId,
+        appointmentId: appointmentRef.id,
+        doctorUserId: doctor.userId,
+      };
     });
     try {
       await this.notifications.publish({
-        userId: result.doctorUserId, type: NotificationType.PROPOSAL_ACCEPTED,
+        userId: result.doctorUserId,
+        type: NotificationType.PROPOSAL_ACCEPTED,
         title: 'Votre proposition a été acceptée',
         body: 'Un patient a accepté votre proposition de consultation.',
         targetUrl: '/medecin/rendez-vous',
       });
     } catch (error) {
-      this.logger.warn(`Appointment ${result.appointmentId} created; notification failed: ${String(error)}`);
+      this.logger.warn(
+        `Appointment ${result.appointmentId} created; notification failed: ${String(error)}`,
+      );
     }
-    return { proposalId: result.proposalId, appointmentId: result.appointmentId };
+    return {
+      proposalId: result.proposalId,
+      appointmentId: result.appointmentId,
+    };
   }
 
   async getMine(
@@ -941,8 +1147,7 @@ export class NeedsService {
       city: need.city,
       district: need.district,
       privateAddress: need.privateAddress ?? null,
-      priority:
-        need.priority === NeedPriority.URGENT ? 'rapide' : 'normal',
+      priority: need.priority === NeedPriority.URGENT ? 'rapide' : 'normal',
       attachments,
     };
   }
@@ -1000,11 +1205,13 @@ export class NeedsService {
       .doc(firebaseUser.uid)
       .get();
     if (!userSnapshot.exists) {
-      throw new NotFoundException('Compte d\'application introuvable');
+      throw new NotFoundException("Compte d'application introuvable");
     }
     const user = userSnapshot.data() as User;
     if (user.role !== AccountRole.PATIENT) {
-      throw new ForbiddenException('Seuls les patients peuvent publier des demandes médicales');
+      throw new ForbiddenException(
+        'Seuls les patients peuvent publier des demandes médicales',
+      );
     }
 
     const needRef = firestore.collection('medicalNeeds').doc();
@@ -1090,13 +1297,16 @@ export class NeedsService {
         error instanceof Error ? error.stack : undefined,
       );
       throw new ServiceUnavailableException(
-        'La demande n\'a pas pu être publiée. Vérifiez la configuration Supabase Storage et réessayez.',
+        "La demande n'a pas pu être publiée. Vérifiez la configuration Supabase Storage et réessayez.",
       );
     }
   }
 
   async close(firebaseUser: DecodedIdToken, id: string): Promise<void> {
-    const needRef = this.firebase.getFirestore().collection('medicalNeeds').doc(id);
+    const needRef = this.firebase
+      .getFirestore()
+      .collection('medicalNeeds')
+      .doc(id);
     const snapshot = await needRef.get();
     if (!snapshot.exists) {
       throw new NotFoundException('Demande médicale introuvable');
@@ -1110,7 +1320,9 @@ export class NeedsService {
         NeedStatus.PROPOSALS_RECEIVED,
       ].includes(need.status)
     ) {
-      throw new BadRequestException('Seules les demandes actives peuvent être fermées');
+      throw new BadRequestException(
+        'Seules les demandes actives peuvent être fermées',
+      );
     }
     await needRef.update({
       status: NeedStatus.CLOSED,
@@ -1128,7 +1340,9 @@ export class NeedsService {
     const need = snapshot.data() as MedicalNeed;
     this.assertOwner(need, firebaseUser.uid);
     if (need.status !== NeedStatus.DRAFT) {
-      throw new BadRequestException('Seules les demandes en brouillon peuvent être supprimées');
+      throw new BadRequestException(
+        'Seules les demandes en brouillon peuvent être supprimées',
+      );
     }
 
     const attachments = need.attachments ?? [];
@@ -1143,7 +1357,7 @@ export class NeedsService {
           error instanceof Error ? error.stack : undefined,
         );
         throw new ServiceUnavailableException(
-          'Les fichiers de la demande n\'ont pas pu être supprimés. La demande n\'a pas été supprimée.',
+          "Les fichiers de la demande n'ont pas pu être supprimés. La demande n'a pas été supprimée.",
         );
       }
     }
@@ -1155,16 +1369,19 @@ export class NeedsService {
     try {
       value = JSON.parse(serializedRequest);
     } catch {
-      throw new BadRequestException('Les détails de la demande doivent être un JSON valide');
+      throw new BadRequestException(
+        'Les détails de la demande doivent être un JSON valide',
+      );
     }
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       throw new BadRequestException('Les détails de la demande sont requis');
     }
     const request = value as Partial<CreateNeedRequest>;
-    const text = (field: unknown): field is string =>
-      typeof field === 'string';
+    const text = (field: unknown): field is string => typeof field === 'string';
     if (!text(request.title) || request.title.trim().length < 5) {
-      throw new BadRequestException('Le titre doit contenir au moins 5 caractères');
+      throw new BadRequestException(
+        'Le titre doit contenir au moins 5 caractères',
+      );
     }
     if (!text(request.specialty) || !request.specialty.trim()) {
       throw new BadRequestException('La spécialité est requise');
@@ -1182,7 +1399,9 @@ export class NeedsService {
       !Array.isArray(request.symptoms) ||
       request.symptoms.some((symptom) => !text(symptom))
     ) {
-      throw new BadRequestException('Les symptômes doivent être une liste de chaînes de caractères');
+      throw new BadRequestException(
+        'Les symptômes doivent être une liste de chaînes de caractères',
+      );
     }
     if (!text(request.city) || !request.city.trim()) {
       throw new BadRequestException('La ville est requise');
@@ -1192,7 +1411,7 @@ export class NeedsService {
     }
     if (request.priority === 'urgence') {
       throw new BadRequestException(
-        'Les urgences médicales doivent être traitées par les services d\'urgence',
+        "Les urgences médicales doivent être traitées par les services d'urgence",
       );
     }
     if (request.priority !== 'normal' && request.priority !== 'rapide') {
@@ -1202,7 +1421,9 @@ export class NeedsService {
       throw new BadRequestException('Le mode de consultation est invalide');
     }
     if (request.consent !== true) {
-      throw new BadRequestException('Le consentement est requis pour publier une demande');
+      throw new BadRequestException(
+        'Le consentement est requis pour publier une demande',
+      );
     }
     return {
       title: request.title.trim(),
@@ -1221,10 +1442,15 @@ export class NeedsService {
 
   private validateFiles(files: UploadedNeedFile[]): void {
     if (files.length > MAX_FILES) {
-      throw new BadRequestException(`Un maximum de ${MAX_FILES} fichiers est autorisé`);
+      throw new BadRequestException(
+        `Un maximum de ${MAX_FILES} fichiers est autorisé`,
+      );
     }
     for (const file of files) {
-      if (!ALLOWED_FILE_TYPES.has(file.mimetype) || !this.hasValidSignature(file)) {
+      if (
+        !ALLOWED_FILE_TYPES.has(file.mimetype) ||
+        !this.hasValidSignature(file)
+      ) {
         throw new BadRequestException(
           'Files must be valid PDF, JPEG, PNG, WebP, HEIC or HEIF files',
         );
@@ -1267,7 +1493,9 @@ export class NeedsService {
 
   private assertOwner(need: MedicalNeed, uid: string): void {
     if (need.ownerUserId !== uid) {
-      throw new ForbiddenException('Vous ne pouvez pas modifier cette demande médicale');
+      throw new ForbiddenException(
+        'Vous ne pouvez pas modifier cette demande médicale',
+      );
     }
   }
 
@@ -1275,11 +1503,13 @@ export class NeedsService {
     const firestore = this.firebase.getFirestore();
     const userSnapshot = await firestore.collection('users').doc(uid).get();
     if (!userSnapshot.exists) {
-      throw new NotFoundException('Compte d\'application introuvable');
+      throw new NotFoundException("Compte d'application introuvable");
     }
     const user = userSnapshot.data() as User;
     if (user.role !== AccountRole.DOCTOR) {
-      throw new ForbiddenException('Seuls les médecins peuvent accéder aux demandes des patients');
+      throw new ForbiddenException(
+        'Seuls les médecins peuvent accéder aux demandes des patients',
+      );
     }
 
     const doctorSnapshot = await firestore
@@ -1312,14 +1542,14 @@ export class NeedsService {
     }
     const parsed = Number(value);
     if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > maximum) {
-      throw new BadRequestException(
-        `${name} must be between 1 and ${maximum}`,
-      );
+      throw new BadRequestException(`${name} must be between 1 and ${maximum}`);
     }
     return parsed;
   }
 
-  private validateProposal(value: CreateProposalRequest): CreateProposalRequest {
+  private validateProposal(
+    value: CreateProposalRequest,
+  ): CreateProposalRequest {
     if (!value || typeof value !== 'object') {
       throw new BadRequestException('Proposal details are required');
     }
@@ -1441,7 +1671,7 @@ export class NeedsService {
     const payload = (await response.json()) as { signedURL?: string };
     if (!payload.signedURL) {
       throw new ServiceUnavailableException(
-        'Supabase Storage n\'a retourné aucune URL signée',
+        "Supabase Storage n'a retourné aucune URL signée",
       );
     }
     return payload.signedURL.startsWith('http')
@@ -1478,9 +1708,11 @@ export class NeedsService {
       case 'image/jpeg':
         return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
       case 'image/png':
-        return bytes.subarray(0, 8).equals(
-          Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-        );
+        return bytes
+          .subarray(0, 8)
+          .equals(
+            Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+          );
       case 'image/webp':
         return (
           bytes.subarray(0, 4).toString() === 'RIFF' &&
@@ -1489,11 +1721,1168 @@ export class NeedsService {
       case 'image/heic':
       case 'image/heif': {
         const brand = bytes.subarray(8, 12).toString();
-        return bytes.subarray(4, 8).toString() === 'ftyp' &&
-          ['heic', 'heix', 'hevc', 'hevx', 'mif1', 'msf1'].includes(brand);
+        return (
+          bytes.subarray(4, 8).toString() === 'ftyp' &&
+          ['heic', 'heix', 'hevc', 'hevx', 'mif1', 'msf1'].includes(brand)
+        );
       }
       default:
         return false;
     }
+  }
+
+  async listMineV2(
+    firebaseUser: DecodedIdToken,
+  ): Promise<PatientNeedListItem[]> {
+    const firestore = this.firebase.getFirestore();
+    const snapshot = await firestore
+      .collection('medicalNeeds')
+      .where('ownerUserId', '==', firebaseUser.uid)
+      .get();
+
+    return Promise.all(
+      snapshot.docs
+        .map((document) => document.data() as MedicalNeed)
+        .sort(
+          (left, right) =>
+            dateFromFirestore(right.createdAt).getTime() -
+            dateFromFirestore(left.createdAt).getTime(),
+        )
+        .map(async (need) => {
+          const proposals = await firestore
+            .collection('doctorProposals')
+            .where('needId', '==', need.id)
+            .get();
+          return {
+            id: need.id,
+            title: need.title,
+            specialty: need.specialty,
+            createdAt: dateFromFirestore(need.createdAt).toISOString(),
+            interested: proposals.size,
+            mode:
+              need.consultationMode === ConsultationMode.HOME
+                ? 'domicile'
+                : 'teleconsultation',
+            status: need.status,
+            attachmentsCount: need.attachments?.length ?? 0,
+          };
+        }),
+    );
+  }
+
+  async listForDoctorV2(
+    firebaseUser: DecodedIdToken,
+    filters: DoctorNeedFilters,
+  ): Promise<PaginatedDoctorNeeds> {
+    await this.getVerifiedDoctor(firebaseUser.uid);
+    const page = this.parsePositiveInteger(filters.page, 1, 'page', 1_000_000);
+    const pageSize = this.parsePositiveInteger(
+      filters.pageSize,
+      10,
+      'pageSize',
+      50,
+    );
+    const search = filters.q?.trim().toLocaleLowerCase() ?? '';
+    if (search.length > 100) {
+      throw new BadRequestException('q must be 100 characters or fewer');
+    }
+    if (
+      filters.specialty &&
+      (filters.specialty.trim().length > 100 || !filters.specialty.trim())
+    ) {
+      throw new BadRequestException('specialty must be 1 to 100 characters');
+    }
+    if (
+      filters.priority &&
+      !Object.values(NeedPriority).includes(filters.priority)
+    ) {
+      throw new BadRequestException('priority is invalid');
+    }
+    if (
+      filters.mode &&
+      !Object.values(ConsultationMode).includes(filters.mode)
+    ) {
+      throw new BadRequestException('consultation mode is invalid');
+    }
+
+    const firestore = this.firebase.getFirestore();
+    const snapshot = await firestore
+      .collection('medicalNeeds')
+      .where('status', 'in', [
+        NeedStatus.PUBLISHED,
+        NeedStatus.AWAITING_PROPOSALS,
+        NeedStatus.PROPOSALS_RECEIVED,
+      ])
+      .get();
+    const availableNeeds = (
+      await Promise.all(
+        snapshot.docs.map(async (document) => {
+          const need = document.data() as MedicalNeed;
+          if (need.ownerUserId === firebaseUser.uid) return null;
+          const ownerSnapshot = await firestore
+            .collection('users')
+            .doc(need.ownerUserId)
+            .get();
+          if (
+            !ownerSnapshot.exists ||
+            (ownerSnapshot.data() as User).role !== AccountRole.PATIENT
+          ) {
+            return null;
+          }
+          return { ...need, id: need.id || document.id };
+        }),
+      )
+    ).filter((need): need is MedicalNeed => need !== null);
+    const specialties = [
+      ...new Set(availableNeeds.map((need) => need.specialty)),
+    ]
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right, 'fr'));
+    const filtered = availableNeeds
+      .filter(
+        (need) =>
+          !filters.specialty || need.specialty === filters.specialty.trim(),
+      )
+      .filter((need) => !filters.priority || need.priority === filters.priority)
+      .filter((need) => !filters.mode || need.consultationMode === filters.mode)
+      .filter((need) => {
+        if (!search) return true;
+        return [
+          need.title,
+          need.description,
+          need.specialty,
+          need.city,
+          need.district,
+        ].some((value) => value.toLocaleLowerCase().includes(search));
+      })
+      .sort(
+        (left, right) =>
+          dateFromFirestore(right.publishedAt ?? right.createdAt).getTime() -
+          dateFromFirestore(left.publishedAt ?? left.createdAt).getTime(),
+      );
+    const offset = (page - 1) * pageSize;
+    const pageNeeds = filtered.slice(offset, offset + pageSize);
+    const [districtSnapshot, citySnapshot] = await Promise.all([
+      firestore.collection('districts').get(),
+      firestore.collection('cities').get(),
+    ]);
+    const cities = new Map(
+      citySnapshot.docs.map((doc) => [
+        doc.id,
+        doc.data().name?.trim().toLowerCase(),
+      ]),
+    );
+    const centers = new Map<string, { latitude: number; longitude: number }>();
+    for (const doc of districtSnapshot.docs) {
+      const area = doc.data();
+      const city = cities.get(area.cityId);
+      const lat = area.centerLatitude;
+      const lon = area.centerLongitude;
+      if (
+        city &&
+        typeof area.name === 'string' &&
+        typeof lat === 'number' &&
+        typeof lon === 'number' &&
+        Number.isFinite(lat) &&
+        Number.isFinite(lon) &&
+        Math.abs(lat) <= 90 &&
+        Math.abs(lon) <= 180
+      ) {
+        centers.set(`${city}::${area.name.trim().toLowerCase()}`, {
+          latitude: lat,
+          longitude: lon,
+        });
+      }
+    }
+    const items = pageNeeds.map((need) => ({
+      id: need.id,
+      title: need.title,
+      summary: need.description,
+      specialty: need.specialty,
+      city: need.city,
+      district: need.district,
+      mode: need.consultationMode,
+      priority: need.priority,
+      publishedAt: dateFromFirestore(
+        need.publishedAt ?? need.createdAt,
+      ).toISOString(),
+      availableFrom: need.availableFrom
+        ? dateFromFirestore(need.availableFrom).toISOString()
+        : null,
+      documentsCount: need.attachments?.length ?? 0,
+      publicLocation:
+        centers.get(
+          `${need.city.trim().toLowerCase()}::${need.district.trim().toLowerCase()}`,
+        ) ?? null,
+    }));
+
+    return {
+      items,
+      specialties,
+      page,
+      pageSize,
+      total: filtered.length,
+      totalPages: Math.ceil(filtered.length / pageSize),
+    };
+  }
+
+  async listProposalsForDoctorV2(
+    firebaseUser: DecodedIdToken,
+    filters: DoctorProposalFilters,
+  ): Promise<PaginatedDoctorProposals> {
+    const doctor = await this.getVerifiedDoctor(firebaseUser.uid);
+    const page = this.parsePositiveInteger(filters.page, 1, 'page', 1_000_000);
+    const pageSize = this.parsePositiveInteger(
+      filters.pageSize,
+      10,
+      'pageSize',
+      50,
+    );
+    if (
+      filters.status &&
+      !Object.values(ProposalStatus).includes(filters.status as ProposalStatus)
+    ) {
+      throw new BadRequestException('proposal status is invalid');
+    }
+
+    const firestore = this.firebase.getFirestore();
+    const proposalsSnapshot = await firestore
+      .collection('doctorProposals')
+      .where('doctorProfileId', '==', doctor.id)
+      .get();
+    const counts: Record<ProposalStatus, number> = {
+      [ProposalStatus.SENT]: 0,
+      [ProposalStatus.PENDING]: 0,
+      [ProposalStatus.ACCEPTED]: 0,
+      [ProposalStatus.REJECTED]: 0,
+      [ProposalStatus.EXPIRED]: 0,
+      [ProposalStatus.CANCELLED]: 0,
+    };
+
+    const items = (
+      await Promise.all(
+        proposalsSnapshot.docs.map(async (document) => {
+          const proposal = document.data() as DoctorProposal;
+          if (!Object.values(ProposalStatus).includes(proposal.status)) {
+            return null;
+          }
+          const needSnapshot = await firestore
+            .collection('medicalNeeds')
+            .doc(proposal.needId)
+            .get();
+          if (!needSnapshot.exists) return null;
+          const need = needSnapshot.data() as MedicalNeed;
+          const ownerSnapshot = await firestore
+            .collection('users')
+            .doc(need.ownerUserId)
+            .get();
+          if (
+            !ownerSnapshot.exists ||
+            (ownerSnapshot.data() as User).role !== AccountRole.PATIENT
+          ) {
+            return null;
+          }
+
+          counts[proposal.status] += 1;
+          return {
+            id: proposal.id || document.id,
+            needId: proposal.needId,
+            needTitle: need.title,
+            specialty: need.specialty,
+            city: need.city,
+            district: need.district,
+            status: proposal.status,
+            message: proposal.message,
+            proposedAt: dateFromFirestore(proposal.proposedAt).toISOString(),
+            proposedAppointmentAt: proposal.proposedAppointmentAt
+              ? dateFromFirestore(proposal.proposedAppointmentAt).toISOString()
+              : null,
+            consultationMode: proposal.consultationMode,
+            fee: proposal.fee,
+            currency: proposal.currency || 'XAF',
+            patientResponse: proposal.patientResponse ?? null,
+            respondedAt: proposal.respondedAt
+              ? dateFromFirestore(proposal.respondedAt).toISOString()
+              : null,
+          } satisfies DoctorProposalListItem;
+        }),
+      )
+    )
+      .filter((item): item is DoctorProposalListItem => item !== null)
+      .filter((item) => !filters.status || item.status === filters.status)
+      .sort(
+        (left, right) =>
+          new Date(right.proposedAt).getTime() -
+          new Date(left.proposedAt).getTime(),
+      );
+
+    const offset = (page - 1) * pageSize;
+    return {
+      items: items.slice(offset, offset + pageSize),
+      counts,
+      page,
+      pageSize,
+      total: items.length,
+      totalPages: Math.ceil(items.length / pageSize),
+    };
+  }
+
+  async getForDoctorV2(
+    firebaseUser: DecodedIdToken,
+    id: string,
+  ): Promise<DoctorNeedDetail> {
+    await this.getVerifiedDoctor(firebaseUser.uid);
+    const snapshot = await this.firebase
+      .getFirestore()
+      .collection('medicalNeeds')
+      .doc(id)
+      .get();
+    if (!snapshot.exists) {
+      throw new NotFoundException('Medical need not found');
+    }
+    const need = snapshot.data() as MedicalNeed;
+    const ownerSnapshot = await this.firebase
+      .getFirestore()
+      .collection('users')
+      .doc(need.ownerUserId)
+      .get();
+    if (
+      need.ownerUserId === firebaseUser.uid ||
+      !ownerSnapshot.exists ||
+      (ownerSnapshot.data() as User).role !== AccountRole.PATIENT ||
+      ![
+        NeedStatus.PUBLISHED,
+        NeedStatus.AWAITING_PROPOSALS,
+        NeedStatus.PROPOSALS_RECEIVED,
+      ].includes(need.status)
+    ) {
+      throw new NotFoundException('Medical need not found');
+    }
+
+    const [proposalSnapshot, attachments] = await Promise.all([
+      this.firebase
+        .getFirestore()
+        .collection('doctorProposals')
+        .where('needId', '==', need.id)
+        .get(),
+      Promise.all(
+        (need.attachments ?? []).map(async (attachment) => ({
+          id: attachment.id,
+          fileName: attachment.fileName,
+          mimeType: attachment.mimeType,
+          sizeBytes: attachment.sizeBytes,
+          downloadUrl: await this.createSignedUrl(attachment.storagePath),
+        })),
+      ),
+    ]);
+
+    return {
+      id: need.id,
+      title: need.title,
+      specialty: need.specialty,
+      createdAt: dateFromFirestore(need.createdAt).toISOString(),
+      interested: proposalSnapshot.size,
+      mode:
+        need.consultationMode === ConsultationMode.HOME
+          ? 'domicile'
+          : 'teleconsultation',
+      status: need.status,
+      attachmentsCount: attachments.length,
+      description: need.description,
+      symptoms: need.symptoms ?? [],
+      durationDescription: need.durationDescription ?? null,
+      city: need.city,
+      district: need.district,
+      privateAddress: null,
+      priority: need.priority,
+      availableFrom: need.availableFrom
+        ? dateFromFirestore(need.availableFrom).toISOString()
+        : null,
+      attachments,
+    };
+  }
+
+  async createProposalV2(
+    firebaseUser: DecodedIdToken,
+    needId: string,
+    request: CreateProposalRequest,
+  ): Promise<{ id: string }> {
+    const doctor = await this.getVerifiedDoctor(firebaseUser.uid);
+    const proposal = this.validateProposal(request);
+    const firestore = this.firebase.getFirestore();
+    const needRef = firestore.collection('medicalNeeds').doc(needId);
+    const needSnapshot = await needRef.get();
+    if (!needSnapshot.exists) {
+      throw new NotFoundException('Medical need not found');
+    }
+    const need = needSnapshot.data() as MedicalNeed;
+    if (
+      need.ownerUserId === firebaseUser.uid ||
+      ![
+        NeedStatus.PUBLISHED,
+        NeedStatus.AWAITING_PROPOSALS,
+        NeedStatus.PROPOSALS_RECEIVED,
+      ].includes(need.status)
+    ) {
+      throw new NotFoundException('Medical need not found');
+    }
+
+    const existingProposals = await firestore
+      .collection('doctorProposals')
+      .where('needId', '==', needId)
+      .get();
+    if (
+      existingProposals.docs.some(
+        (document) =>
+          (document.data() as DoctorProposal).doctorProfileId === doctor.id,
+      )
+    ) {
+      throw new ConflictException(
+        'Vous avez déjà envoyé une proposition pour cette demande',
+      );
+    }
+
+    const proposalRef = firestore.collection('doctorProposals').doc();
+    const now = new Date();
+    const newProposal: DoctorProposal = {
+      id: proposalRef.id,
+      needId,
+      doctorProfileId: doctor.id,
+      status: ProposalStatus.PENDING,
+      message: [
+        proposal.message,
+        proposal.details?.trim()
+          ? `Informations complémentaires : ${proposal.details.trim()}`
+          : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      proposedAt: now,
+      proposedAppointmentAt: new Date(proposal.proposedAppointmentAt),
+      consultationMode: proposal.consultationMode,
+      fee: proposal.fee,
+      currency: 'XAF',
+      patientResponse: null,
+      respondedAt: null,
+      expiresAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await firestore.runTransaction(async (transaction) => {
+      const currentNeedSnapshot = await transaction.get(needRef);
+      if (!currentNeedSnapshot.exists) {
+        throw new NotFoundException('Medical need not found');
+      }
+      const currentNeed = currentNeedSnapshot.data() as MedicalNeed;
+      if (
+        ![
+          NeedStatus.PUBLISHED,
+          NeedStatus.AWAITING_PROPOSALS,
+          NeedStatus.PROPOSALS_RECEIVED,
+        ].includes(currentNeed.status)
+      ) {
+        throw new BadRequestException(
+          'This request is no longer accepting proposals',
+        );
+      }
+      transaction.create(proposalRef, newProposal);
+      transaction.update(needRef, {
+        status: NeedStatus.PROPOSALS_RECEIVED,
+        updatedAt: now,
+      });
+    });
+
+    try {
+      await this.notifications.publish({
+        userId: need.ownerUserId,
+        type: NotificationType.PROPOSAL_RECEIVED,
+        title: 'Nouvelle proposition',
+        body: 'Un médecin a répondu à votre demande.',
+        targetUrl: `/patient/demandes/${encodeURIComponent(needId)}`,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to create notification for proposal ${proposalRef.id}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+
+    return { id: proposalRef.id };
+  }
+
+  async cancelProposalV2(
+    firebaseUser: DecodedIdToken,
+    proposalId: string,
+  ): Promise<{ id: string; status: ProposalStatus }> {
+    const doctor = await this.getVerifiedDoctor(firebaseUser.uid);
+    const proposalRef = this.firebase
+      .getFirestore()
+      .collection('doctorProposals')
+      .doc(proposalId);
+    const snapshot = await proposalRef.get();
+    if (!snapshot.exists) {
+      throw new NotFoundException('Proposal not found');
+    }
+    const proposal = snapshot.data() as DoctorProposal;
+    if (proposal.doctorProfileId !== doctor.id) {
+      throw new NotFoundException('Proposal not found');
+    }
+    if (
+      proposal.status !== ProposalStatus.PENDING &&
+      proposal.status !== ProposalStatus.SENT
+    ) {
+      throw new BadRequestException('This proposal can no longer be cancelled');
+    }
+    await proposalRef.update({
+      status: ProposalStatus.CANCELLED,
+      updatedAt: new Date(),
+    });
+    return { id: proposal.id || snapshot.id, status: ProposalStatus.CANCELLED };
+  }
+
+  async listPatientProposalsV2(
+    firebaseUser: DecodedIdToken,
+    needId: string,
+  ): Promise<{ items: PatientProposalView[] }> {
+    const firestore = this.firebase.getFirestore();
+    const needSnapshot = await firestore
+      .collection('medicalNeeds')
+      .doc(needId)
+      .get();
+    if (!needSnapshot.exists)
+      throw new NotFoundException('Medical need not found');
+    this.assertOwner(needSnapshot.data() as MedicalNeed, firebaseUser.uid);
+    const snapshot = await firestore
+      .collection('doctorProposals')
+      .where('needId', '==', needId)
+      .get();
+    const items = await Promise.all(
+      snapshot.docs.map(async (document) => {
+        const proposal = document.data() as DoctorProposal;
+        const doctorSnapshot = await firestore
+          .collection('doctorProfiles')
+          .doc(proposal.doctorProfileId)
+          .get();
+        if (!doctorSnapshot.exists) return null;
+        const doctor = doctorSnapshot.data() as DoctorProfile;
+        if (doctor.verificationStatus !== DoctorVerificationStatus.VERIFIED)
+          return null;
+        const userSnapshot = await firestore
+          .collection('users')
+          .doc(doctor.userId)
+          .get();
+        if (!userSnapshot.exists) return null;
+        const user = userSnapshot.data() as User;
+        if (user.role !== AccountRole.DOCTOR) return null;
+        return {
+          id: proposal.id || document.id,
+          status: proposal.status,
+          doctor: {
+            id: doctorSnapshot.id,
+            name:
+              doctor.fullName?.trim() ||
+              `${user.firstName} ${user.lastName}`.trim(),
+            specialty: user.specialty?.trim() || 'Médecine générale',
+          },
+          conversationId: createHash('sha256')
+            .update(`${firebaseUser.uid}:${doctorSnapshot.id}`)
+            .digest('hex'),
+          message: proposal.message,
+          proposedAt: dateFromFirestore(proposal.proposedAt).toISOString(),
+          proposedAppointmentAt: proposal.proposedAppointmentAt
+            ? dateFromFirestore(proposal.proposedAppointmentAt).toISOString()
+            : null,
+          consultationMode: proposal.consultationMode,
+          fee: proposal.fee,
+          currency: proposal.currency || 'XAF',
+        } satisfies PatientProposalView;
+      }),
+    );
+    return {
+      items: items
+        .filter((item): item is PatientProposalView => item !== null)
+        .sort((a, b) => Date.parse(b.proposedAt) - Date.parse(a.proposedAt)),
+    };
+  }
+
+  async acceptPatientProposalV2(
+    firebaseUser: DecodedIdToken,
+    needId: string,
+    proposalId: string,
+  ): Promise<{ proposalId: string; appointmentId: string }> {
+    const db = this.firebase.getFirestore();
+    const needRef = db.collection('medicalNeeds').doc(needId);
+    const proposalRef = db.collection('doctorProposals').doc(proposalId);
+    const preflightProposal = await proposalRef.get();
+    if (
+      !preflightProposal.exists ||
+      preflightProposal.data()?.needId !== needId
+    ) {
+      throw new NotFoundException('Proposal not found for this request');
+    }
+    const doctorProfileId = (preflightProposal.data() as DoctorProposal)
+      .doctorProfileId;
+    const doctorRef = db.collection('doctorProfiles').doc(doctorProfileId);
+    const preflightDoctor = await doctorRef.get();
+    if (!preflightDoctor.exists)
+      throw new NotFoundException('Doctor not found');
+    const doctorUserRef = db
+      .collection('users')
+      .doc((preflightDoctor.data() as DoctorProfile).userId);
+    const appointmentRef = db.collection('appointments').doc();
+    const patientRef = db.collection('patients').doc(firebaseUser.uid);
+    const allProposalsQuery = db
+      .collection('doctorProposals')
+      .where('needId', '==', needId);
+    const appointmentsQuery = db
+      .collection('appointments')
+      .where('doctorProfileId', '==', doctorProfileId);
+    const modesQuery = db
+      .collection('doctorConsultationModes')
+      .where('doctorProfileId', '==', doctorProfileId);
+    const weeklyQuery = db
+      .collection('doctorWeeklyAvailabilities')
+      .where('doctorProfileId', '==', doctorProfileId);
+    const blockedQuery = db
+      .collection('doctorBlockedDates')
+      .where('doctorProfileId', '==', doctorProfileId);
+    const addressesQuery = db
+      .collection('addresses')
+      .where('userId', '==', firebaseUser.uid);
+    const now = new Date();
+
+    const result = await db.runTransaction(async (tx) => {
+      // Firestore transaction: read everything first, then write atomically.
+      const [
+        needSnapshot,
+        proposalSnapshot,
+        doctorSnapshot,
+        doctorUserSnapshot,
+        patientSnapshot,
+        allProposals,
+        appointmentsSnapshot,
+        modesSnapshot,
+        weeklySnapshot,
+        blockedSnapshot,
+        addressesSnapshot,
+      ] = await Promise.all([
+        tx.get(needRef),
+        tx.get(proposalRef),
+        tx.get(doctorRef),
+        tx.get(doctorUserRef),
+        tx.get(patientRef),
+        tx.get(allProposalsQuery),
+        tx.get(appointmentsQuery),
+        tx.get(modesQuery),
+        tx.get(weeklyQuery),
+        tx.get(blockedQuery),
+        tx.get(addressesQuery),
+      ]);
+      if (!needSnapshot.exists)
+        throw new NotFoundException('Demande médicale introuvable');
+      const need = needSnapshot.data() as MedicalNeed;
+      this.assertOwner(need, firebaseUser.uid);
+      if (
+        ![
+          NeedStatus.PUBLISHED,
+          NeedStatus.AWAITING_PROPOSALS,
+          NeedStatus.PROPOSALS_RECEIVED,
+        ].includes(need.status)
+      ) {
+        throw new ConflictException(
+          'Un médecin a déjà été sélectionné ou cette demande est fermée',
+        );
+      }
+      if (!proposalSnapshot.exists)
+        throw new NotFoundException('Proposition introuvable');
+      const proposal = proposalSnapshot.data() as DoctorProposal;
+      if (
+        proposal.needId !== needId ||
+        proposal.doctorProfileId !== doctorProfileId ||
+        ![ProposalStatus.PENDING, ProposalStatus.SENT].includes(proposal.status)
+      ) {
+        throw new ConflictException(
+          'Cette proposition ne peut plus être acceptée',
+        );
+      }
+      if (
+        allProposals.docs.some(
+          (doc) =>
+            doc.id !== proposalId &&
+            doc.data().status === ProposalStatus.ACCEPTED,
+        )
+      ) {
+        throw new ConflictException(
+          'Une autre proposition a déjà été acceptée',
+        );
+      }
+      if (!doctorSnapshot.exists || !doctorUserSnapshot.exists) {
+        throw new NotFoundException('Médecin introuvable');
+      }
+      const doctor = doctorSnapshot.data() as DoctorProfile;
+      const doctorUser = doctorUserSnapshot.data() as User;
+      if (
+        doctor.verificationStatus !== DoctorVerificationStatus.VERIFIED ||
+        doctorUser.role !== AccountRole.DOCTOR ||
+        doctorUser.status !== AccountStatus.ACTIVE
+      ) {
+        throw new BadRequestException(
+          "Le médecin n'est pas disponible pour les rendez-vous",
+        );
+      }
+      // The patient explicitly accepts the proposal's consultation mode, which
+      // may differ from the initially requested mode. Only the doctor's actual
+      // configured modes can authorize an appointment.
+      if (
+        ![ConsultationMode.HOME, ConsultationMode.TELECONSULTATION].includes(
+          proposal.consultationMode,
+        )
+      ) {
+        throw new BadRequestException(
+          'Mode de consultation invalide dans la proposition',
+        );
+      }
+      if (
+        !modesSnapshot.docs.some(
+          (doc) => doc.data().mode === proposal.consultationMode,
+        )
+      ) {
+        throw new BadRequestException(
+          "Le médecin n'a pas activé le mode de consultation proposé",
+        );
+      }
+      if (!proposal.proposedAppointmentAt)
+        throw new BadRequestException(
+          'La date de rendez-vous proposée est manquante',
+        );
+      const startsAt = dateFromFirestore(proposal.proposedAppointmentAt);
+      if (
+        !Number.isFinite(startsAt.getTime()) ||
+        startsAt.getTime() <= Date.now()
+      ) {
+        throw new BadRequestException(
+          'Le rendez-vous proposé est dans le passé',
+        );
+      }
+      const duration =
+        Number.isSafeInteger(doctor.defaultAppointmentDurationMinutes) &&
+        doctor.defaultAppointmentDurationMinutes > 0
+          ? doctor.defaultAppointmentDurationMinutes
+          : 30;
+      const endsAt = new Date(startsAt.getTime() + duration * 60_000);
+      const localParts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Africa/Douala',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        weekday: 'long',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+      }).formatToParts(startsAt);
+      const local = Object.fromEntries(
+        localParts.map(({ type, value }) => [type, value]),
+      );
+      const weekday = local.weekday.toLowerCase();
+      const day = `${local.year}-${local.month}-${local.day}`;
+      const minutes = Number(local.hour) * 60 + Number(local.minute);
+      const available = weeklySnapshot.docs.some((doc) => {
+        const slot = doc.data();
+        const [sh, sm] = String(slot.startTime).split(':').map(Number);
+        const [eh, em] = String(slot.endTime).split(':').map(Number);
+        return (
+          slot.isAvailable === true &&
+          slot.weekday === weekday &&
+          minutes >= sh * 60 + sm &&
+          minutes + duration <= eh * 60 + em
+        );
+      });
+      if (!available)
+        throw new BadRequestException(
+          "Le médecin n'est pas disponible à l'heure proposée",
+        );
+      const blocked = blockedSnapshot.docs.some((doc) => {
+        const value = doc.data().date as Date | Timestamp;
+        const parts = new Intl.DateTimeFormat('en-GB', {
+          timeZone: 'Africa/Douala',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).formatToParts(dateFromFirestore(value));
+        const localDay = Object.fromEntries(
+          parts.map(({ type, value }) => [type, value]),
+        );
+        return `${localDay.year}-${localDay.month}-${localDay.day}` === day;
+      });
+      if (blocked)
+        throw new BadRequestException(
+          'Le médecin est indisponible à la date proposée',
+        );
+      const conflict = appointmentsSnapshot.docs.some((doc) => {
+        const old = doc.data();
+        if (
+          ![
+            AppointmentStatus.CONFIRMED,
+            AppointmentStatus.PENDING_CONFIRMATION,
+          ].includes(old.status)
+        )
+          return false;
+        const oldStart = dateFromFirestore(
+          old.scheduledAt as Date | Timestamp,
+        ).getTime();
+        const oldEnd = oldStart + (Number(old.durationMinutes) || 30) * 60_000;
+        return startsAt.getTime() < oldEnd && endsAt.getTime() > oldStart;
+      });
+      if (conflict)
+        throw new ConflictException(
+          'Ce créneau de rendez-vous est déjà réservé',
+        );
+      const primaryAddress = addressesSnapshot.docs.find(
+        (doc) => doc.data().isPrimary === true,
+      );
+      if (
+        proposal.consultationMode === ConsultationMode.HOME &&
+        !primaryAddress
+      ) {
+        throw new BadRequestException(
+          "Ajoutez une adresse principale avant d'accepter une visite à domicile",
+        );
+      }
+      tx.update(proposalRef, {
+        status: ProposalStatus.ACCEPTED,
+        respondedAt: now,
+        patientResponse: 'Proposition acceptée',
+        updatedAt: now,
+      });
+      for (const doc of allProposals.docs) {
+        if (doc.id === proposalId) continue;
+        if (
+          [ProposalStatus.PENDING, ProposalStatus.SENT].includes(
+            doc.data().status,
+          )
+        ) {
+          tx.update(doc.ref, {
+            status: ProposalStatus.REJECTED,
+            patientResponse: 'Une autre proposition a été acceptée',
+            respondedAt: now,
+            updatedAt: now,
+          });
+        }
+      }
+      tx.update(needRef, {
+        status: NeedStatus.APPOINTMENT_CONFIRMED,
+        consultationMode: proposal.consultationMode,
+        updatedAt: now,
+      });
+      tx.create(appointmentRef, {
+        id: appointmentRef.id,
+        patientProfileId: patientSnapshot.exists
+          ? (patientSnapshot.data()?.id ?? firebaseUser.uid)
+          : firebaseUser.uid,
+        doctorProfileId,
+        needId,
+        proposalId,
+        status: AppointmentStatus.CONFIRMED,
+        consultationMode: proposal.consultationMode,
+        scheduledAt: startsAt,
+        durationMinutes: duration,
+        fee: proposal.fee,
+        currency: proposal.currency || 'XAF',
+        addressId: primaryAddress
+          ? (primaryAddress.data().id ?? primaryAddress.id)
+          : null,
+        cancellationReason: null,
+        completedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      return {
+        proposalId,
+        appointmentId: appointmentRef.id,
+        doctorUserId: doctor.userId,
+      };
+    });
+    try {
+      await this.notifications.publish({
+        userId: result.doctorUserId,
+        type: NotificationType.PROPOSAL_ACCEPTED,
+        title: 'Votre proposition a été acceptée',
+        body: 'Un patient a accepté votre proposition de consultation.',
+        targetUrl: '/medecin/rendez-vous',
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Appointment ${result.appointmentId} created; notification failed: ${String(error)}`,
+      );
+    }
+    return {
+      proposalId: result.proposalId,
+      appointmentId: result.appointmentId,
+    };
+  }
+
+  async getMineV2(
+    firebaseUser: DecodedIdToken,
+    id: string,
+  ): Promise<PatientNeedDetail> {
+    const firestore = this.firebase.getFirestore();
+    const needRef = firestore.collection('medicalNeeds').doc(id);
+    const snapshot = await needRef.get();
+    if (!snapshot.exists) {
+      throw new NotFoundException('Demande médicale introuvable');
+    }
+
+    const need = snapshot.data() as MedicalNeed;
+    this.assertOwner(need, firebaseUser.uid);
+    const [proposalSnapshot, attachments] = await Promise.all([
+      firestore
+        .collection('doctorProposals')
+        .where('needId', '==', need.id)
+        .get(),
+      Promise.all(
+        (need.attachments ?? []).map(async (attachment) => ({
+          id: attachment.id,
+          fileName: attachment.fileName,
+          mimeType: attachment.mimeType,
+          sizeBytes: attachment.sizeBytes,
+          downloadUrl: await this.createSignedUrl(attachment.storagePath),
+        })),
+      ),
+    ]);
+
+    return {
+      id: need.id,
+      title: need.title,
+      specialty: need.specialty,
+      createdAt: dateFromFirestore(need.createdAt).toISOString(),
+      interested: proposalSnapshot.size,
+      mode:
+        need.consultationMode === ConsultationMode.HOME
+          ? 'domicile'
+          : 'teleconsultation',
+      status: need.status,
+      attachmentsCount: attachments.length,
+      description: need.description,
+      symptoms: need.symptoms ?? [],
+      durationDescription: need.durationDescription ?? null,
+      city: need.city,
+      district: need.district,
+      privateAddress: need.privateAddress ?? null,
+      priority: need.priority === NeedPriority.URGENT ? 'rapide' : 'normal',
+      attachments,
+    };
+  }
+
+  async updateV2(
+    firebaseUser: DecodedIdToken,
+    id: string,
+    request: UpdateNeedRequest,
+  ): Promise<PatientNeedDetail> {
+    const firestore = this.firebase.getFirestore();
+    const needRef = firestore.collection('medicalNeeds').doc(id);
+    const snapshot = await needRef.get();
+    if (!snapshot.exists) {
+      throw new NotFoundException('Demande médicale introuvable');
+    }
+    const need = snapshot.data() as MedicalNeed;
+    this.assertOwner(need, firebaseUser.uid);
+    if (
+      ![
+        NeedStatus.DRAFT,
+        NeedStatus.PUBLISHED,
+        NeedStatus.AWAITING_PROPOSALS,
+        NeedStatus.PROPOSALS_RECEIVED,
+      ].includes(need.status)
+    ) {
+      throw new BadRequestException('This request can no longer be edited');
+    }
+
+    const update = this.validateUpdate(request);
+    await needRef.update({
+      title: update.title,
+      specialty: update.specialty,
+      description: update.description,
+      consultationMode:
+        update.mode === 'domicile'
+          ? ConsultationMode.HOME
+          : ConsultationMode.TELECONSULTATION,
+      updatedAt: new Date(),
+    });
+
+    return this.getMine(firebaseUser, id);
+  }
+
+  async createV2(
+    firebaseUser: DecodedIdToken,
+    serializedRequest: string,
+    files: UploadedNeedFile[],
+  ): Promise<PatientNeedListItem> {
+    const request = this.parseRequest(serializedRequest);
+    this.validateFiles(files);
+
+    const firestore = this.firebase.getFirestore();
+    const userSnapshot = await firestore
+      .collection('users')
+      .doc(firebaseUser.uid)
+      .get();
+    if (!userSnapshot.exists) {
+      throw new NotFoundException("Compte d'application introuvable");
+    }
+    const user = userSnapshot.data() as User;
+    if (user.role !== AccountRole.PATIENT) {
+      throw new ForbiddenException(
+        'Seuls les patients peuvent publier des demandes médicales',
+      );
+    }
+
+    const needRef = firestore.collection('medicalNeeds').doc();
+    const now = new Date();
+    const uploadedObjects: string[] = [];
+    let attachments: NeedAttachment[] = [];
+
+    try {
+      if (files.length > 0) {
+        for (const file of files) {
+          const id = randomUUID();
+          const storagePath = `medical-needs/${firebaseUser.uid}/${needRef.id}/${id}`;
+          uploadedObjects.push(storagePath);
+          const storageUrl = await this.uploadFile(storagePath, file);
+          attachments.push({
+            id,
+            fileName: file.originalname,
+            storageUrl,
+            storagePath,
+            mimeType: file.mimetype,
+            sizeBytes: file.size,
+            uploadedAt: now,
+          });
+        }
+      }
+
+      const patientSnapshot = await firestore
+        .collection('patients')
+        .doc(firebaseUser.uid)
+        .get();
+      const patientId = patientSnapshot.exists
+        ? ((patientSnapshot.data() as { id?: string }).id ?? firebaseUser.uid)
+        : null;
+
+      const need: MedicalNeed = {
+        id: needRef.id,
+        ownerUserId: firebaseUser.uid,
+        patientProfileId: patientId,
+        specialtyId: null,
+        specialty: request.specialty,
+        city: request.city,
+        district: request.district,
+        title: request.title,
+        description: request.description,
+        symptoms: request.symptoms,
+        durationDescription: request.since?.trim() || null,
+        priority:
+          request.priority === 'rapide'
+            ? NeedPriority.URGENT
+            : NeedPriority.ROUTINE,
+        consultationMode:
+          request.mode === 'domicile'
+            ? ConsultationMode.HOME
+            : ConsultationMode.TELECONSULTATION,
+        status: NeedStatus.AWAITING_PROPOSALS,
+        availableFrom: null,
+        privateAddress: request.address?.trim() || null,
+        attachments,
+        publishedAt: now,
+        consentAt: now,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      await needRef.set(need);
+      return {
+        id: need.id,
+        title: need.title,
+        specialty: need.specialty,
+        createdAt: now.toISOString(),
+        interested: 0,
+        mode: request.mode === 'domicile' ? 'domicile' : 'teleconsultation',
+        status: need.status,
+        attachmentsCount: attachments.length,
+      };
+    } catch (error) {
+      await this.deleteUploadedObjects(uploadedObjects);
+      if (error instanceof ServiceUnavailableException) {
+        throw error;
+      }
+      this.logger.error(
+        'Failed to publish a patient medical need',
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw new ServiceUnavailableException(
+        "La demande n'a pas pu être publiée. Vérifiez la configuration Supabase Storage et réessayez.",
+      );
+    }
+  }
+
+  async closeV2(firebaseUser: DecodedIdToken, id: string): Promise<void> {
+    const needRef = this.firebase
+      .getFirestore()
+      .collection('medicalNeeds')
+      .doc(id);
+    const snapshot = await needRef.get();
+    if (!snapshot.exists) {
+      throw new NotFoundException('Demande médicale introuvable');
+    }
+    const need = snapshot.data() as MedicalNeed;
+    this.assertOwner(need, firebaseUser.uid);
+    if (
+      ![
+        NeedStatus.PUBLISHED,
+        NeedStatus.AWAITING_PROPOSALS,
+        NeedStatus.PROPOSALS_RECEIVED,
+      ].includes(need.status)
+    ) {
+      throw new BadRequestException(
+        'Seules les demandes actives peuvent être fermées',
+      );
+    }
+    await needRef.update({
+      status: NeedStatus.CLOSED,
+      updatedAt: new Date(),
+    });
+  }
+
+  async removeV2(firebaseUser: DecodedIdToken, id: string): Promise<void> {
+    const firestore = this.firebase.getFirestore();
+    const needRef = firestore.collection('medicalNeeds').doc(id);
+    const snapshot = await needRef.get();
+    if (!snapshot.exists) {
+      throw new NotFoundException('Demande médicale introuvable');
+    }
+    const need = snapshot.data() as MedicalNeed;
+    this.assertOwner(need, firebaseUser.uid);
+    if (need.status !== NeedStatus.DRAFT) {
+      throw new BadRequestException(
+        'Seules les demandes en brouillon peuvent être supprimées',
+      );
+    }
+
+    const attachments = need.attachments ?? [];
+    if (attachments.length > 0) {
+      try {
+        await this.deleteSupabaseObjects(
+          attachments.map((attachment) => attachment.storagePath),
+        );
+      } catch (error) {
+        this.logger.error(
+          `Failed to remove files for medical need ${id}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+        throw new ServiceUnavailableException(
+          "Les fichiers de la demande n'ont pas pu être supprimés. La demande n'a pas été supprimée.",
+        );
+      }
+    }
+    await needRef.delete();
   }
 }

@@ -59,10 +59,7 @@ export class NeedsController {
   }
 
   @Get('doctor/:id')
-  getForDoctor(
-    @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
-  ) {
+  getForDoctor(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
     return this.needsService.getForDoctor(request.firebaseUser, id);
   }
 
@@ -73,11 +70,7 @@ export class NeedsController {
     @Param('id') id: string,
     @Body() body: CreateProposalRequest,
   ) {
-    return this.needsService.createProposal(
-      request.firebaseUser,
-      id,
-      body,
-    );
+    return this.needsService.createProposal(request.firebaseUser, id, body);
   }
 
   @Patch('doctor/proposals/:id/cancel')
@@ -90,7 +83,10 @@ export class NeedsController {
   }
 
   @Get(':id/proposals')
-  patientProposals(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
+  patientProposals(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
     return this.needsService.listPatientProposals(request.firebaseUser, id);
   }
 
@@ -100,7 +96,11 @@ export class NeedsController {
     @Param('id') id: string,
     @Param('proposalId') proposalId: string,
   ) {
-    return this.needsService.acceptPatientProposal(request.firebaseUser, id, proposalId);
+    return this.needsService.acceptPatientProposal(
+      request.firebaseUser,
+      id,
+      proposalId,
+    );
   }
 
   @Get(':id')
@@ -113,7 +113,13 @@ export class NeedsController {
   update(
     @Req() request: AuthenticatedRequest,
     @Param('id') id: string,
-    @Body() body: { title: string; specialty: string; description: string; mode: 'domicile' | 'tele' },
+    @Body()
+    body: {
+      title: string;
+      specialty: string;
+      description: string;
+      mode: 'domicile' | 'tele';
+    },
   ) {
     return this.needsService.update(request.firebaseUser, id, body);
   }
@@ -150,6 +156,139 @@ export class NeedsController {
   @HttpCode(HttpStatus.OK)
   async remove(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
     await this.needsService.remove(request.firebaseUser, id);
+    return { message: 'Medical need deleted' };
+  }
+
+  // V2 route copies
+
+  @Get('v2')
+  listV2(@Req() request: AuthenticatedRequest) {
+    return this.needsService.listMineV2(request.firebaseUser);
+  }
+
+  @Get('v2/doctor')
+  listForDoctorV2(
+    @Req() request: AuthenticatedRequest,
+    @Query() filters: DoctorNeedFilters,
+  ) {
+    return this.needsService.listForDoctorV2(request.firebaseUser, filters);
+  }
+
+  @Get('v2/doctor/proposals')
+  listDoctorProposalsV2(
+    @Req() request: AuthenticatedRequest,
+    @Query() filters: DoctorProposalFilters,
+  ) {
+    return this.needsService.listProposalsForDoctorV2(
+      request.firebaseUser,
+      filters,
+    );
+  }
+
+  @Get('v2/doctor/:id')
+  getForDoctorV2(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
+    return this.needsService.getForDoctorV2(request.firebaseUser, id);
+  }
+
+  @Post('v2/doctor/:id/proposals')
+  @HttpCode(HttpStatus.CREATED)
+  createProposalV2(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: CreateProposalRequest,
+  ) {
+    return this.needsService.createProposalV2(request.firebaseUser, id, body);
+  }
+
+  @Patch('v2/doctor/proposals/:id/cancel')
+  @HttpCode(HttpStatus.OK)
+  cancelDoctorProposalV2(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
+    return this.needsService.cancelProposalV2(request.firebaseUser, id);
+  }
+
+  @Get('v2/:id/proposals')
+  patientProposalsV2(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
+    return this.needsService.listPatientProposalsV2(request.firebaseUser, id);
+  }
+
+  @Patch('v2/:id/proposals/:proposalId/accept')
+  acceptPatientProposalV2(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Param('proposalId') proposalId: string,
+  ) {
+    return this.needsService.acceptPatientProposalV2(
+      request.firebaseUser,
+      id,
+      proposalId,
+    );
+  }
+
+  @Get('v2/:id')
+  getV2(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
+    return this.needsService.getMineV2(request.firebaseUser, id);
+  }
+
+  @Patch('v2/:id')
+  @HttpCode(HttpStatus.OK)
+  updateV2(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body()
+    body: {
+      title: string;
+      specialty: string;
+      description: string;
+      mode: 'domicile' | 'tele';
+    },
+  ) {
+    return this.needsService.updateV2(request.firebaseUser, id, body);
+  }
+
+  @Post('v2')
+  @UseInterceptors(
+    FilesInterceptor('files', MAX_FILES, {
+      limits: { fileSize: MAX_FILE_SIZE, files: MAX_FILES },
+    }),
+  )
+  createV2(
+    @Req() request: AuthenticatedRequest,
+    @Body('data') serializedRequest: string,
+    @UploadedFiles() files: UploadedNeedFile[] = [],
+  ) {
+    if (typeof serializedRequest !== 'string') {
+      throw new BadRequestException('Request details are required');
+    }
+    return this.needsService.createV2(
+      request.firebaseUser,
+      serializedRequest,
+      files,
+    );
+  }
+
+  @Patch('v2/:id/close')
+  @HttpCode(HttpStatus.OK)
+  async closeV2(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
+    await this.needsService.closeV2(request.firebaseUser, id);
+    return { message: 'Medical need closed' };
+  }
+
+  @Delete('v2/:id')
+  @HttpCode(HttpStatus.OK)
+  async removeV2(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
+    await this.needsService.removeV2(request.firebaseUser, id);
     return { message: 'Medical need deleted' };
   }
 }

@@ -63,14 +63,20 @@ function asDate(value: unknown): Date | null {
   return null;
 }
 
-function conversationId(patientUserId: string, doctorProfileId: string): string {
+function conversationId(
+  patientUserId: string,
+  doctorProfileId: string,
+): string {
   return createHash('sha256')
     .update(`${patientUserId}:${doctorProfileId}`)
     .digest('hex');
 }
 
 function userName(user: User): string {
-  return [user.firstName, user.lastName].filter(Boolean).join(' ').trim() || 'Utilisateur';
+  return (
+    [user.firstName, user.lastName].filter(Boolean).join(' ').trim() ||
+    'Utilisateur'
+  );
 }
 
 @Injectable()
@@ -95,9 +101,7 @@ export class MessagesService {
           .collection('messages');
         const [lastMessageSnapshot, receivedMessages] = await Promise.all([
           messages.orderBy('sentAt', 'desc').limit(1).get(),
-          messages
-            .where('receiverUserId', '==', firebaseUser.uid)
-            .get(),
+          messages.where('receiverUserId', '==', firebaseUser.uid).get(),
         ]);
         const unreadCount = receivedMessages.docs.filter(
           (document) => !document.data().readAt,
@@ -113,7 +117,8 @@ export class MessagesService {
           peerName: context.peerName,
           requestId: context.requestId,
           requestTitle: context.requestTitle,
-          preview: typeof lastMessage?.body === 'string' ? lastMessage.body : '',
+          preview:
+            typeof lastMessage?.body === 'string' ? lastMessage.body : '',
           lastMessageAt: lastMessageAt?.toISOString() ?? null,
           unreadCount,
           interactionAt: context.interactionAt,
@@ -148,9 +153,7 @@ export class MessagesService {
       .collection('messages');
     const [snapshot, receivedMessages] = await Promise.all([
       messages.orderBy('sentAt', 'desc').limit(100).get(),
-      messages
-        .where('receiverUserId', '==', firebaseUser.uid)
-        .get(),
+      messages.where('receiverUserId', '==', firebaseUser.uid).get(),
     ]);
     const unreadMessages = receivedMessages.docs.filter(
       (document) => !document.data().readAt,
@@ -182,7 +185,7 @@ export class MessagesService {
           readAt:
             data.receiverUserId === firebaseUser.uid && !data.readAt
               ? now.toISOString()
-              : asDate(data.readAt)?.toISOString() ?? null,
+              : (asDate(data.readAt)?.toISOString() ?? null),
         } satisfies MessageItem;
       })
       .filter((item): item is MessageItem => item !== null);
@@ -194,8 +197,14 @@ export class MessagesService {
     id: string,
     rawBody: unknown,
   ): Promise<MessageItem> {
-    if (typeof rawBody !== 'string' || !rawBody.trim() || rawBody.trim().length > 4000) {
-      throw new BadRequestException('Message body must contain 1 to 4000 characters');
+    if (
+      typeof rawBody !== 'string' ||
+      !rawBody.trim() ||
+      rawBody.trim().length > 4000
+    ) {
+      throw new BadRequestException(
+        'Message body must contain 1 to 4000 characters',
+      );
     }
     const context = await this.getConversationContext(firebaseUser.uid, id);
     const isDoctor = context.doctorUserId === firebaseUser.uid;
@@ -205,7 +214,9 @@ export class MessagesService {
     const now = new Date();
     const messageId = randomUUID();
     const firestore = this.firebase.getFirestore();
-    const conversationRef = firestore.collection('conversations').doc(context.id);
+    const conversationRef = firestore
+      .collection('conversations')
+      .doc(context.id);
     const messageRef = conversationRef.collection('messages').doc(messageId);
     const conversationSnapshot = await conversationRef.get();
     const message: MessageItem = {
@@ -279,7 +290,9 @@ export class MessagesService {
     if (!userSnapshot.exists) throw new NotFoundException('Compte introuvable');
     const user = userSnapshot.data() as User;
     if (user.role !== AccountRole.DOCTOR && user.role !== AccountRole.PATIENT) {
-      throw new ForbiddenException('Seuls les patients et les médecins peuvent utiliser la messagerie');
+      throw new ForbiddenException(
+        'Seuls les patients et les médecins peuvent utiliser la messagerie',
+      );
     }
 
     let doctorProfile: DoctorProfile | null = null;
@@ -290,13 +303,18 @@ export class MessagesService {
         .limit(1)
         .get();
       const profileDoc = profiles.docs[0];
-      if (!profileDoc) throw new ForbiddenException('Profil médecin indisponible');
+      if (!profileDoc)
+        throw new ForbiddenException('Profil médecin indisponible');
       doctorProfile = {
         ...(profileDoc.data() as DoctorProfile),
         id: (profileDoc.data() as DoctorProfile).id || profileDoc.id,
       };
-      if (doctorProfile.verificationStatus !== DoctorVerificationStatus.VERIFIED) {
-        throw new ForbiddenException('Seuls les médecins vérifiés peuvent utiliser la messagerie');
+      if (
+        doctorProfile.verificationStatus !== DoctorVerificationStatus.VERIFIED
+      ) {
+        throw new ForbiddenException(
+          'Seuls les médecins vérifiés peuvent utiliser la messagerie',
+        );
       }
     }
 
@@ -400,11 +418,196 @@ export class MessagesService {
         .get();
       snapshot = byId.docs[0] ?? snapshot;
     }
-    if (!snapshot.exists) throw new NotFoundException('Profil médecin introuvable');
+    if (!snapshot.exists)
+      throw new NotFoundException('Profil médecin introuvable');
     const profile = snapshot.data() as DoctorProfile;
     if (profile.verificationStatus !== DoctorVerificationStatus.VERIFIED) {
-      throw new ForbiddenException('Seuls les médecins vérifiés peuvent utiliser la messagerie');
+      throw new ForbiddenException(
+        'Seuls les médecins vérifiés peuvent utiliser la messagerie',
+      );
     }
     return { ...profile, id: profile.id || snapshot.id };
+  }
+
+  async listConversationsV2(
+    firebaseUser: DecodedIdToken,
+  ): Promise<{ items: ConversationListItem[] }> {
+    const contexts = await this.findConversationContexts(firebaseUser.uid);
+    const firestore = this.firebase.getFirestore();
+    const items = await Promise.all(
+      contexts.map(async (context) => {
+        const messages = firestore
+          .collection('conversations')
+          .doc(context.id)
+          .collection('messages');
+        const [lastMessageSnapshot, receivedMessages] = await Promise.all([
+          messages.orderBy('sentAt', 'desc').limit(1).get(),
+          messages.where('receiverUserId', '==', firebaseUser.uid).get(),
+        ]);
+        const unreadCount = receivedMessages.docs.filter(
+          (document) => !document.data().readAt,
+        ).length;
+        const lastMessage = lastMessageSnapshot.docs[0]?.data();
+        const lastMessageAt = asDate(lastMessage?.sentAt);
+        return {
+          id: context.id,
+          peerUserId:
+            context.doctorUserId === firebaseUser.uid
+              ? context.patientUserId
+              : context.doctorUserId,
+          peerName: context.peerName,
+          requestId: context.requestId,
+          requestTitle: context.requestTitle,
+          preview:
+            typeof lastMessage?.body === 'string' ? lastMessage.body : '',
+          lastMessageAt: lastMessageAt?.toISOString() ?? null,
+          unreadCount,
+          interactionAt: context.interactionAt,
+        };
+      }),
+    );
+
+    return {
+      items: items
+        .sort((left, right) => {
+          const leftTime = left.lastMessageAt
+            ? new Date(left.lastMessageAt).getTime()
+            : left.interactionAt.getTime();
+          const rightTime = right.lastMessageAt
+            ? new Date(right.lastMessageAt).getTime()
+            : right.interactionAt.getTime();
+          return rightTime - leftTime;
+        })
+        .map(({ interactionAt: _interactionAt, ...item }) => item),
+    };
+  }
+
+  async listMessagesV2(
+    firebaseUser: DecodedIdToken,
+    id: string,
+  ): Promise<{ items: MessageItem[] }> {
+    const context = await this.getConversationContext(firebaseUser.uid, id);
+    const messages = this.firebase
+      .getFirestore()
+      .collection('conversations')
+      .doc(context.id)
+      .collection('messages');
+    const [snapshot, receivedMessages] = await Promise.all([
+      messages.orderBy('sentAt', 'desc').limit(100).get(),
+      messages.where('receiverUserId', '==', firebaseUser.uid).get(),
+    ]);
+    const unreadMessages = receivedMessages.docs.filter(
+      (document) => !document.data().readAt,
+    );
+
+    const now = new Date();
+    for (let offset = 0; offset < unreadMessages.length; offset += 450) {
+      const batch = this.firebase.getFirestore().batch();
+      for (const document of unreadMessages.slice(offset, offset + 450)) {
+        batch.update(document.ref, { readAt: now });
+      }
+      await batch.commit();
+    }
+
+    const items = snapshot.docs
+      .reverse()
+      .map((document) => {
+        const data = document.data();
+        const sentAt = asDate(data.sentAt);
+        if (!sentAt || typeof data.body !== 'string') {
+          this.logger.warn(`Ignoring malformed message ${document.id}`);
+          return null;
+        }
+        return {
+          id: document.id,
+          senderUserId: String(data.senderUserId ?? ''),
+          body: data.body,
+          sentAt: sentAt.toISOString(),
+          readAt:
+            data.receiverUserId === firebaseUser.uid && !data.readAt
+              ? now.toISOString()
+              : (asDate(data.readAt)?.toISOString() ?? null),
+        } satisfies MessageItem;
+      })
+      .filter((item): item is MessageItem => item !== null);
+    return { items };
+  }
+
+  async sendMessageV2(
+    firebaseUser: DecodedIdToken,
+    id: string,
+    rawBody: unknown,
+  ): Promise<MessageItem> {
+    if (
+      typeof rawBody !== 'string' ||
+      !rawBody.trim() ||
+      rawBody.trim().length > 4000
+    ) {
+      throw new BadRequestException(
+        'Message body must contain 1 to 4000 characters',
+      );
+    }
+    const context = await this.getConversationContext(firebaseUser.uid, id);
+    const isDoctor = context.doctorUserId === firebaseUser.uid;
+    const recipientUserId = isDoctor
+      ? context.patientUserId
+      : context.doctorUserId;
+    const now = new Date();
+    const messageId = randomUUID();
+    const firestore = this.firebase.getFirestore();
+    const conversationRef = firestore
+      .collection('conversations')
+      .doc(context.id);
+    const messageRef = conversationRef.collection('messages').doc(messageId);
+    const conversationSnapshot = await conversationRef.get();
+    const message: MessageItem = {
+      id: messageId,
+      senderUserId: firebaseUser.uid,
+      body: rawBody.trim(),
+      sentAt: now.toISOString(),
+      readAt: null,
+    };
+
+    const batch = firestore.batch();
+    batch.set(
+      conversationRef,
+      {
+        id: context.id,
+        patientProfileId: context.patientUserId,
+        patientUserId: context.patientUserId,
+        doctorProfileId: context.doctorProfileId,
+        doctorUserId: context.doctorUserId,
+        needId: context.requestId,
+        lastMessageAt: now,
+        updatedAt: now,
+        ...(!conversationSnapshot.exists ? { createdAt: now } : {}),
+      },
+      { merge: true },
+    );
+    batch.create(messageRef, {
+      ...message,
+      conversationId: context.id,
+      receiverUserId: recipientUserId,
+      sentAt: now,
+    });
+    await batch.commit();
+
+    try {
+      await this.notifications.publish({
+        userId: recipientUserId,
+        type: NotificationType.NEW_MESSAGE,
+        title: isDoctor
+          ? 'Nouveau message de votre médecin'
+          : 'Nouveau message d’un patient',
+        body: 'Vous avez reçu un nouveau message.',
+        targetUrl: `${isDoctor ? '/patient/profil?activeContent=messages&tab=messages&' : '/medecin/messages?'}conversation=${context.id}`,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Message ${messageId} was saved, but its notification could not be sent`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+    return message;
   }
 }

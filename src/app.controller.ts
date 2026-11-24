@@ -9,4 +9,11 @@ export class AppController {
   getHello(): string {
     return this.appService.getHello();
   }
+
+  // V2 route copies
+
+  @Get('v2')
+  getHelloV2(): string {
+    return this.appService.getHelloV2();
+  }
 }

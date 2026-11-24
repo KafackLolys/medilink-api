@@ -121,32 +121,55 @@ export class AvailabilitiesService {
   /** Saved consultation modes, never inferred from weekly availability. */
   async getModes(uid: string): Promise<ConsultationMode[]> {
     const doctorProfileId = await this.resolveDoctorProfileId(uid);
-    const snapshot = await this.firebase.getFirestore()
+    const snapshot = await this.firebase
+      .getFirestore()
       .collection('doctorConsultationModes')
       .where('doctorProfileId', '==', doctorProfileId)
       .get();
     const configured = new Set(snapshot.docs.map((doc) => doc.data().mode));
-    return [ConsultationMode.HOME, ConsultationMode.TELECONSULTATION]
-      .filter((mode) => configured.has(mode));
+    return [ConsultationMode.HOME, ConsultationMode.TELECONSULTATION].filter(
+      (mode) => configured.has(mode),
+    );
   }
 
   /** Atomically replace the doctor's selected modes with 1 or 2 choices. */
-  async setModes(uid: string, requestedModes: unknown): Promise<ConsultationMode[]> {
-    if (!Array.isArray(requestedModes) || requestedModes.length < 1 || requestedModes.length > 2 ||
-        requestedModes.some((mode: unknown) => mode !== ConsultationMode.HOME && mode !== ConsultationMode.TELECONSULTATION) ||
-        new Set(requestedModes).size !== requestedModes.length) {
-      throw new BadRequestException('Choisissez un ou deux modes de consultation valides.');
+  async setModes(
+    uid: string,
+    requestedModes: unknown,
+  ): Promise<ConsultationMode[]> {
+    if (
+      !Array.isArray(requestedModes) ||
+      requestedModes.length < 1 ||
+      requestedModes.length > 2 ||
+      requestedModes.some(
+        (mode: unknown) =>
+          mode !== ConsultationMode.HOME &&
+          mode !== ConsultationMode.TELECONSULTATION,
+      ) ||
+      new Set(requestedModes).size !== requestedModes.length
+    ) {
+      throw new BadRequestException(
+        'Choisissez un ou deux modes de consultation valides.',
+      );
     }
     const doctorProfileId = await this.resolveDoctorProfileId(uid);
     const firestore = this.firebase.getFirestore();
     const collection = firestore.collection('doctorConsultationModes');
-    const existing = await collection.where('doctorProfileId', '==', doctorProfileId).get();
+    const existing = await collection
+      .where('doctorProfileId', '==', doctorProfileId)
+      .get();
     const now = new Date();
     const batch = firestore.batch();
     for (const document of existing.docs) batch.delete(document.ref);
     for (const mode of requestedModes as ConsultationMode[]) {
       const ref = collection.doc();
-      batch.set(ref, { id: ref.id, doctorProfileId, mode, createdAt: now, updatedAt: now });
+      batch.set(ref, {
+        id: ref.id,
+        doctorProfileId,
+        mode,
+        createdAt: now,
+        updatedAt: now,
+      });
     }
     await batch.commit();
     return this.getModes(uid);
@@ -154,19 +177,38 @@ export class AvailabilitiesService {
 
   async getDuration(uid: string): Promise<{ durationMinutes: number }> {
     const doctorProfileId = await this.resolveDoctorProfileId(uid);
-    const snapshot = await this.firebase.getFirestore().collection('doctorProfiles').doc(doctorProfileId).get();
-    const durationMinutes = (snapshot.data() as { defaultAppointmentDurationMinutes?: number } | undefined)?.defaultAppointmentDurationMinutes ?? 30;
+    const snapshot = await this.firebase
+      .getFirestore()
+      .collection('doctorProfiles')
+      .doc(doctorProfileId)
+      .get();
+    const durationMinutes =
+      (
+        snapshot.data() as
+          { defaultAppointmentDurationMinutes?: number } | undefined
+      )?.defaultAppointmentDurationMinutes ?? 30;
     return { durationMinutes };
   }
 
-  async setDuration(uid: string, durationMinutes: number): Promise<{ durationMinutes: number }> {
-    if (!Number.isInteger(durationMinutes) || ![15, 20, 30, 45, 60].includes(durationMinutes)) {
+  async setDuration(
+    uid: string,
+    durationMinutes: number,
+  ): Promise<{ durationMinutes: number }> {
+    if (
+      !Number.isInteger(durationMinutes) ||
+      ![15, 20, 30, 45, 60].includes(durationMinutes)
+    ) {
       throw new BadRequestException('Durée de consultation invalide');
     }
     const doctorProfileId = await this.resolveDoctorProfileId(uid);
-    await this.firebase.getFirestore().collection('doctorProfiles').doc(doctorProfileId).update({
-      defaultAppointmentDurationMinutes: durationMinutes, updatedAt: new Date(),
-    });
+    await this.firebase
+      .getFirestore()
+      .collection('doctorProfiles')
+      .doc(doctorProfileId)
+      .update({
+        defaultAppointmentDurationMinutes: durationMinutes,
+        updatedAt: new Date(),
+      });
     return { durationMinutes };
   }
 
@@ -190,14 +232,15 @@ export class AvailabilitiesService {
       });
     }
 
-    return WEEKDAYS.map((weekday) =>
-      byWeekday.get(weekday) ?? {
-        id: '',
-        weekday,
-        isAvailable: false,
-        startTime: '09:00',
-        endTime: '17:00',
-      },
+    return WEEKDAYS.map(
+      (weekday) =>
+        byWeekday.get(weekday) ?? {
+          id: '',
+          weekday,
+          isAvailable: false,
+          startTime: '09:00',
+          endTime: '17:00',
+        },
     );
   }
 
@@ -265,7 +308,8 @@ export class AvailabilitiesService {
     return snapshot.docs
       .map((document) => {
         const data = document.data() as DoctorBlockedDate;
-        const date = data.date instanceof Timestamp ? data.date.toDate() : data.date;
+        const date =
+          data.date instanceof Timestamp ? data.date.toDate() : data.date;
         return {
           id: document.id,
           date: asLocalDateString(date),
@@ -325,7 +369,10 @@ export class AvailabilitiesService {
   async deleteBlocked(uid: string, id: string): Promise<void> {
     const doctorProfileId = await this.resolveDoctorProfileId(uid);
     const firestore = this.firebase.getFirestore();
-    const document = await firestore.collection('doctorBlockedDates').doc(id).get();
+    const document = await firestore
+      .collection('doctorBlockedDates')
+      .doc(id)
+      .get();
     if (!document.exists) {
       throw new NotFoundException('Date bloquée introuvable');
     }
@@ -368,7 +415,10 @@ export class AvailabilitiesService {
           const patientProfile = patientSnapshot.data();
           const userSnapshot = await firestore
             .collection('users')
-            .doc((patientProfile as { userId?: string }).userId ?? data.patientProfileId)
+            .doc(
+              (patientProfile as { userId?: string }).userId ??
+                data.patientProfileId,
+            )
             .get();
           if (userSnapshot.exists) {
             const user = userSnapshot.data() as User;
@@ -381,7 +431,347 @@ export class AvailabilitiesService {
               .get();
             if (addressSnapshot.exists) {
               district =
-                (addressSnapshot.data() as { district?: string }).district ?? null;
+                (addressSnapshot.data() as { district?: string }).district ??
+                null;
+            }
+          }
+        }
+      } catch {
+        // Ignorer les erreurs de chargement patient, garder les valeurs par défaut.
+      }
+
+      views.push({
+        id: document.id,
+        date: asLocalDateString(scheduledAt),
+        time: asLocalTimeString(scheduledAt),
+        patient,
+        district,
+        status: data.status,
+      });
+    }
+
+    views.sort(
+      (left, right) =>
+        new Date(`${left.date}T${left.time}`).getTime() -
+        new Date(`${right.date}T${right.time}`).getTime(),
+    );
+
+    return views.slice(0, 4);
+  }
+
+  async getModesV2(uid: string): Promise<ConsultationMode[]> {
+    const doctorProfileId = await this.resolveDoctorProfileId(uid);
+    const snapshot = await this.firebase
+      .getFirestore()
+      .collection('doctorConsultationModes')
+      .where('doctorProfileId', '==', doctorProfileId)
+      .get();
+    const configured = new Set(snapshot.docs.map((doc) => doc.data().mode));
+    return [ConsultationMode.HOME, ConsultationMode.TELECONSULTATION].filter(
+      (mode) => configured.has(mode),
+    );
+  }
+
+  async setModesV2(
+    uid: string,
+    requestedModes: unknown,
+  ): Promise<ConsultationMode[]> {
+    if (
+      !Array.isArray(requestedModes) ||
+      requestedModes.length < 1 ||
+      requestedModes.length > 2 ||
+      requestedModes.some(
+        (mode: unknown) =>
+          mode !== ConsultationMode.HOME &&
+          mode !== ConsultationMode.TELECONSULTATION,
+      ) ||
+      new Set(requestedModes).size !== requestedModes.length
+    ) {
+      throw new BadRequestException(
+        'Choisissez un ou deux modes de consultation valides.',
+      );
+    }
+    const doctorProfileId = await this.resolveDoctorProfileId(uid);
+    const firestore = this.firebase.getFirestore();
+    const collection = firestore.collection('doctorConsultationModes');
+    const existing = await collection
+      .where('doctorProfileId', '==', doctorProfileId)
+      .get();
+    const now = new Date();
+    const batch = firestore.batch();
+    for (const document of existing.docs) batch.delete(document.ref);
+    for (const mode of requestedModes as ConsultationMode[]) {
+      const ref = collection.doc();
+      batch.set(ref, {
+        id: ref.id,
+        doctorProfileId,
+        mode,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    await batch.commit();
+    return this.getModes(uid);
+  }
+
+  async getDurationV2(uid: string): Promise<{ durationMinutes: number }> {
+    const doctorProfileId = await this.resolveDoctorProfileId(uid);
+    const snapshot = await this.firebase
+      .getFirestore()
+      .collection('doctorProfiles')
+      .doc(doctorProfileId)
+      .get();
+    const durationMinutes =
+      (
+        snapshot.data() as
+          { defaultAppointmentDurationMinutes?: number } | undefined
+      )?.defaultAppointmentDurationMinutes ?? 30;
+    return { durationMinutes };
+  }
+
+  async setDurationV2(
+    uid: string,
+    durationMinutes: number,
+  ): Promise<{ durationMinutes: number }> {
+    if (
+      !Number.isInteger(durationMinutes) ||
+      ![15, 20, 30, 45, 60].includes(durationMinutes)
+    ) {
+      throw new BadRequestException('Durée de consultation invalide');
+    }
+    const doctorProfileId = await this.resolveDoctorProfileId(uid);
+    await this.firebase
+      .getFirestore()
+      .collection('doctorProfiles')
+      .doc(doctorProfileId)
+      .update({
+        defaultAppointmentDurationMinutes: durationMinutes,
+        updatedAt: new Date(),
+      });
+    return { durationMinutes };
+  }
+
+  async getWeeklyV2(uid: string): Promise<WeeklyAvailabilityOutput[]> {
+    const doctorProfileId = await this.resolveDoctorProfileId(uid);
+    const firestore = this.firebase.getFirestore();
+    const snapshot = await firestore
+      .collection('doctorWeeklyAvailabilities')
+      .where('doctorProfileId', '==', doctorProfileId)
+      .get();
+
+    const byWeekday = new Map<Weekday, WeeklyAvailabilityOutput>();
+    for (const document of snapshot.docs) {
+      const data = document.data() as DoctorWeeklyAvailability;
+      byWeekday.set(data.weekday, {
+        id: document.id,
+        weekday: data.weekday,
+        isAvailable: data.isAvailable,
+        startTime: data.startTime,
+        endTime: data.endTime,
+      });
+    }
+
+    return WEEKDAYS.map(
+      (weekday) =>
+        byWeekday.get(weekday) ?? {
+          id: '',
+          weekday,
+          isAvailable: false,
+          startTime: '09:00',
+          endTime: '17:00',
+        },
+    );
+  }
+
+  async setWeeklyV2(
+    uid: string,
+    availabilities: WeeklyAvailabilityInput[],
+  ): Promise<WeeklyAvailabilityOutput[]> {
+    const doctorProfileId = await this.resolveDoctorProfileId(uid);
+    const firestore = this.firebase.getFirestore();
+
+    for (const item of availabilities) {
+      if (!WEEKDAYS.includes(item.weekday)) {
+        throw new BadRequestException(`Jour invalide : ${item.weekday}`);
+      }
+      if (item.isAvailable) {
+        if (!item.startTime || !item.endTime) {
+          throw new BadRequestException(
+            'Les heures de début et de fin sont requises quand le jour est activé.',
+          );
+        }
+        if (item.startTime >= item.endTime) {
+          throw new BadRequestException(
+            "L'heure de fin doit être postérieure à l'heure de début.",
+          );
+        }
+      }
+    }
+
+    await firestore.runTransaction(async (transaction) => {
+      const existing = await firestore
+        .collection('doctorWeeklyAvailabilities')
+        .where('doctorProfileId', '==', doctorProfileId)
+        .get();
+      for (const document of existing.docs) {
+        transaction.delete(document.ref);
+      }
+
+      const now = new Date();
+      for (const item of availabilities) {
+        const ref = firestore.collection('doctorWeeklyAvailabilities').doc();
+        transaction.create(ref, {
+          id: ref.id,
+          doctorProfileId,
+          weekday: item.weekday,
+          isAvailable: item.isAvailable,
+          startTime: item.startTime,
+          endTime: item.endTime,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    });
+
+    return this.getWeekly(uid);
+  }
+
+  async getBlockedV2(uid: string): Promise<BlockedDateOutput[]> {
+    const doctorProfileId = await this.resolveDoctorProfileId(uid);
+    const firestore = this.firebase.getFirestore();
+    const snapshot = await firestore
+      .collection('doctorBlockedDates')
+      .where('doctorProfileId', '==', doctorProfileId)
+      .get();
+
+    return snapshot.docs
+      .map((document) => {
+        const data = document.data() as DoctorBlockedDate;
+        const date =
+          data.date instanceof Timestamp ? data.date.toDate() : data.date;
+        return {
+          id: document.id,
+          date: asLocalDateString(date),
+          label: formatLabel(date),
+          reason: data.reason ?? null,
+          _dateObj: date,
+        };
+      })
+      .sort((a, b) => a._dateObj.getTime() - b._dateObj.getTime())
+      .map(({ _dateObj, ...rest }) => rest);
+  }
+
+  async createBlockedV2(
+    uid: string,
+    input: CreateBlockedDateInput,
+  ): Promise<BlockedDateOutput> {
+    const doctorProfileId = await this.resolveDoctorProfileId(uid);
+    const firestore = this.firebase.getFirestore();
+
+    const date = new Date(`${input.date}T12:00:00`);
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException('Date invalide');
+    }
+
+    const existing = await firestore
+      .collection('doctorBlockedDates')
+      .where('doctorProfileId', '==', doctorProfileId)
+      .get();
+    for (const document of existing.docs) {
+      const data = document.data() as DoctorBlockedDate;
+      if (asLocalDateString(data.date) === input.date) {
+        throw new BadRequestException('Cette date est déjà bloquée.');
+      }
+    }
+
+    const id = randomUUID();
+    const now = new Date();
+    const blockedDate: DoctorBlockedDate = {
+      id,
+      doctorProfileId,
+      date,
+      reason: input.reason?.trim() ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await firestore.collection('doctorBlockedDates').doc(id).set(blockedDate);
+
+    return {
+      id,
+      date: input.date,
+      label: formatLabel(date),
+      reason: blockedDate.reason,
+    };
+  }
+
+  async deleteBlockedV2(uid: string, id: string): Promise<void> {
+    const doctorProfileId = await this.resolveDoctorProfileId(uid);
+    const firestore = this.firebase.getFirestore();
+    const document = await firestore
+      .collection('doctorBlockedDates')
+      .doc(id)
+      .get();
+    if (!document.exists) {
+      throw new NotFoundException('Date bloquée introuvable');
+    }
+    const data = document.data() as DoctorBlockedDate;
+    if (data.doctorProfileId !== doctorProfileId) {
+      throw new BadRequestException('Accès non autorisé à cette date bloquée.');
+    }
+    await firestore.collection('doctorBlockedDates').doc(id).delete();
+  }
+
+  async getDoctorAppointmentsV2(uid: string): Promise<DoctorAppointmentView[]> {
+    const doctorProfileId = await this.resolveDoctorProfileId(uid);
+    const firestore = this.firebase.getFirestore();
+    const now = new Date();
+
+    const snapshot = await firestore
+      .collection('appointments')
+      .where('doctorProfileId', '==', doctorProfileId)
+      .where('status', '==', AppointmentStatus.CONFIRMED)
+      .get();
+
+    const views: DoctorAppointmentView[] = [];
+    for (const document of snapshot.docs) {
+      const data = document.data() as Appointment;
+      const scheduledAt =
+        data.scheduledAt instanceof Timestamp
+          ? data.scheduledAt.toDate()
+          : data.scheduledAt;
+      if (scheduledAt.getTime() <= now.getTime()) continue;
+
+      let patient = 'Patient';
+      let district: string | null = null;
+
+      try {
+        const patientSnapshot = await firestore
+          .collection('patientProfiles')
+          .doc(data.patientProfileId)
+          .get();
+        if (patientSnapshot.exists) {
+          const patientProfile = patientSnapshot.data();
+          const userSnapshot = await firestore
+            .collection('users')
+            .doc(
+              (patientProfile as { userId?: string }).userId ??
+                data.patientProfileId,
+            )
+            .get();
+          if (userSnapshot.exists) {
+            const user = userSnapshot.data() as User;
+            patient = `${user.firstName} ${user.lastName}`.trim() || patient;
+          }
+          if (data.addressId) {
+            const addressSnapshot = await firestore
+              .collection('addresses')
+              .doc(data.addressId)
+              .get();
+            if (addressSnapshot.exists) {
+              district =
+                (addressSnapshot.data() as { district?: string }).district ??
+                null;
             }
           }
         }

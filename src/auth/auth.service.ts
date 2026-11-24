@@ -159,7 +159,7 @@ export class AuthService {
     const uid = tokens.localId;
     if (!uid) {
       throw new ServiceUnavailableException(
-        'Firebase Authentication n\'a retourné aucun identifiant utilisateur',
+        "Firebase Authentication n'a retourné aucun identifiant utilisateur",
       );
     }
 
@@ -198,9 +198,7 @@ export class AuthService {
       await firestore.runTransaction(async (transaction) => {
         const existingUser = await transaction.get(userRef);
         if (existingUser.exists) {
-          throw new ConflictException(
-            'Ce compte Firebase est déjà enregistré',
-          );
+          throw new ConflictException('Ce compte Firebase est déjà enregistré');
         }
         const existingDoctorProfile =
           request.role === AccountRole.DOCTOR
@@ -256,7 +254,7 @@ export class AuthService {
             cleanupError instanceof Error ? cleanupError.stack : undefined,
           );
           throw new ServiceUnavailableException(
-            'L\'inscription a échoué et le compte Firebase n\'a pas pu être annulé',
+            "L'inscription a échoué et le compte Firebase n'a pas pu être annulé",
           );
         }
       }
@@ -270,11 +268,14 @@ export class AuthService {
   }
 
   /** Google OAuth: identify an existing account without assigning any role from client input. */
-  async googleStatus(rawToken: unknown): Promise<
-    { registered: false } | { registered: true; user: AuthProfile }
-  > {
+  async googleStatus(
+    rawToken: unknown,
+  ): Promise<{ registered: false } | { registered: true; user: AuthProfile }> {
     const identity = await this.verifyGoogleIdentity(rawToken);
-    const userRef = this.firebase.getFirestore().collection('users').doc(identity.uid);
+    const userRef = this.firebase
+      .getFirestore()
+      .collection('users')
+      .doc(identity.uid);
     const snapshot = await userRef.get();
     if (!snapshot.exists) {
       await this.assertNoOtherEmailAccount(identity.uid, identity.email!);
@@ -283,14 +284,26 @@ export class AuthService {
     const user = snapshot.data() as User;
     this.assertAccountCanSignIn(user);
     if (user.email!.toLowerCase() !== identity.email!.toLowerCase()) {
-      throw new ConflictException('Ce compte possède une autre adresse e-mail. Contactez le support.');
+      throw new ConflictException(
+        'Ce compte possède une autre adresse e-mail. Contactez le support.',
+      );
     }
-    await userRef.update({ lastLoginAt: new Date(), emailVerified: true, updatedAt: new Date() });
-    return { registered: true, user: this.toProfile({ ...user, emailVerified: true }) };
+    await userRef.update({
+      lastLoginAt: new Date(),
+      emailVerified: true,
+      updatedAt: new Date(),
+    });
+    return {
+      registered: true,
+      user: this.toProfile({ ...user, emailVerified: true }),
+    };
   }
 
   /** New Google identities may choose only patient or doctor; admin never. */
-  async googleComplete(rawToken: unknown, role: unknown): Promise<{ user: AuthProfile }> {
+  async googleComplete(
+    rawToken: unknown,
+    role: unknown,
+  ): Promise<{ user: AuthProfile }> {
     const identity = await this.verifyGoogleIdentity(rawToken);
     if (role !== AccountRole.PATIENT && role !== AccountRole.DOCTOR) {
       throw new BadRequestException('Choisissez le profil Patient ou Médecin.');
@@ -301,36 +314,61 @@ export class AuthService {
     const email = identity.email!.trim().toLowerCase();
     await this.assertNoOtherEmailAccount(identity.uid, email);
     const firebaseUser = await this.firebase.getAuth().getUser(identity.uid);
-    const parts = (firebaseUser.displayName ?? '').trim().split(/\s+/).filter(Boolean);
+    const parts = (firebaseUser.displayName ?? '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
     const firstName = parts[0]?.slice(0, 80) || 'Utilisateur';
     const lastName = parts.slice(1).join(' ').slice(0, 80);
     const now = new Date();
     const user: User = {
-      id: identity.uid, firstName, lastName, role, email,
+      id: identity.uid,
+      firstName,
+      lastName,
+      role,
+      email,
       phone: firebaseUser.phoneNumber ?? '',
-      specialty: null, registrationNumber: null,
-      status: role === AccountRole.DOCTOR ? AccountStatus.PENDING : AccountStatus.ACTIVE,
-      emailVerified: true, phoneVerified: Boolean(firebaseUser.phoneNumber),
-      lastLoginAt: now, createdAt: now, updatedAt: now,
+      specialty: null,
+      registrationNumber: null,
+      status:
+        role === AccountRole.DOCTOR
+          ? AccountStatus.PENDING
+          : AccountStatus.ACTIVE,
+      emailVerified: true,
+      phoneVerified: Boolean(firebaseUser.phoneNumber),
+      lastLoginAt: now,
+      createdAt: now,
+      updatedAt: now,
     };
-    await db.runTransaction(async tx => {
+    await db.runTransaction(async (tx) => {
       const [existing, doctorProfile] = await Promise.all([
-        tx.get(ref), role === AccountRole.DOCTOR ? tx.get(doctorRef) : Promise.resolve(null),
+        tx.get(ref),
+        role === AccountRole.DOCTOR ? tx.get(doctorRef) : Promise.resolve(null),
       ]);
       if (existing.exists) {
-        throw new ConflictException('Ce compte est déjà inscrit. Reconnectez-vous avec Google.');
+        throw new ConflictException(
+          'Ce compte est déjà inscrit. Reconnectez-vous avec Google.',
+        );
       }
-      if (doctorProfile?.exists) throw new ConflictException('Un profil médecin existe déjà.');
+      if (doctorProfile?.exists)
+        throw new ConflictException('Un profil médecin existe déjà.');
       tx.create(ref, user);
       if (role === AccountRole.DOCTOR) {
         const profile: DoctorProfile = {
-          id: identity.uid, userId: identity.uid,
+          id: identity.uid,
+          userId: identity.uid,
           fullName: `${firstName} ${lastName}`.trim(),
-          registrationNumber: '', bio: '', yearsOfExperience: 0,
-          consultationFee: 0, currency: 'XAF', defaultAppointmentDurationMinutes: 30,
+          registrationNumber: '',
+          bio: '',
+          yearsOfExperience: 0,
+          consultationFee: 0,
+          currency: 'XAF',
+          defaultAppointmentDurationMinutes: 30,
           professionalAddress: null,
-          verificationStatus: DoctorVerificationStatus.PENDING, verifiedAt: null,
-          createdAt: now, updatedAt: now,
+          verificationStatus: DoctorVerificationStatus.PENDING,
+          verifiedAt: null,
+          createdAt: now,
+          updatedAt: now,
         };
         tx.create(doctorRef, profile);
       }
@@ -338,23 +376,38 @@ export class AuthService {
     return { user: this.toProfile(user) };
   }
 
-  private async verifyGoogleIdentity(rawToken: unknown): Promise<DecodedIdToken> {
+  private async verifyGoogleIdentity(
+    rawToken: unknown,
+  ): Promise<DecodedIdToken> {
     if (typeof rawToken !== 'string' || !rawToken || rawToken.length > 10000) {
       throw new BadRequestException('Jeton Google Firebase requis');
     }
     const decoded = await this.verifyToken(rawToken);
-    if (decoded.firebase?.sign_in_provider !== 'google.com' ||
-        !decoded.email || decoded.email_verified !== true) {
-      throw new ForbiddenException('Connectez-vous avec un compte Google dont l’e-mail est vérifié.');
+    if (
+      decoded.firebase?.sign_in_provider !== 'google.com' ||
+      !decoded.email ||
+      decoded.email_verified !== true
+    ) {
+      throw new ForbiddenException(
+        'Connectez-vous avec un compte Google dont l’e-mail est vérifié.',
+      );
     }
     return decoded;
   }
 
-  private async assertNoOtherEmailAccount(uid: string, email: string): Promise<void> {
-    const snapshot = await this.firebase.getFirestore().collection('users')
-      .where('email', '==', email).get();
-    if (snapshot.docs.some(doc => doc.id !== uid)) {
-      throw new ConflictException('Un compte MediLink existe déjà avec cet e-mail. Connectez-vous avec votre méthode habituelle avant de lier Google.');
+  private async assertNoOtherEmailAccount(
+    uid: string,
+    email: string,
+  ): Promise<void> {
+    const snapshot = await this.firebase
+      .getFirestore()
+      .collection('users')
+      .where('email', '==', email)
+      .get();
+    if (snapshot.docs.some((doc) => doc.id !== uid)) {
+      throw new ConflictException(
+        'Un compte MediLink existe déjà avec cet e-mail. Connectez-vous avec votre méthode habituelle avant de lier Google.',
+      );
     }
   }
 
@@ -482,7 +535,10 @@ export class AuthService {
     };
   }
 
-  async updateAdminProfile(uid: string, body: UpdateAdminProfileRequest): Promise<{ user: AuthProfile }> {
+  async updateAdminProfile(
+    uid: string,
+    body: UpdateAdminProfileRequest,
+  ): Promise<{ user: AuthProfile }> {
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       throw new BadRequestException('Profile data is required');
     }
@@ -496,14 +552,24 @@ export class AuthService {
       throw new BadRequestException('Invalid phone number');
     }
     const ref = this.firebase.getFirestore().collection('users').doc(uid);
-    await this.firebase.getFirestore().runTransaction(async transaction => {
+    await this.firebase.getFirestore().runTransaction(async (transaction) => {
       const snapshot = await transaction.get(ref);
       if (!snapshot.exists) throw new NotFoundException('Account not found');
       const user = snapshot.data() as User;
-      if (user.role !== AccountRole.ADMIN || user.status !== AccountStatus.ACTIVE) {
-        throw new ForbiddenException('Seul un administrateur actif peut modifier ce profil');
+      if (
+        user.role !== AccountRole.ADMIN ||
+        user.status !== AccountStatus.ACTIVE
+      ) {
+        throw new ForbiddenException(
+          'Seul un administrateur actif peut modifier ce profil',
+        );
       }
-      transaction.update(ref, { firstName, lastName, phone, updatedAt: new Date() });
+      transaction.update(ref, {
+        firstName,
+        lastName,
+        phone,
+        updatedAt: new Date(),
+      });
     });
     const updated = await this.getStoredUser(uid);
     return { user: this.toProfile(updated) };
@@ -531,7 +597,7 @@ export class AuthService {
       user.status === AccountStatus.SUSPENDED ||
       user.status === AccountStatus.DELETED
     ) {
-      throw new ForbiddenException('Ce compte n\'est pas actif');
+      throw new ForbiddenException("Ce compte n'est pas actif");
     }
   }
 
@@ -629,7 +695,9 @@ export class AuthService {
         'USER_TOKEN_EXPIRED',
       ].includes(code)
     ) {
-      throw new UnauthorizedException('Identifiants invalides ou session expirée');
+      throw new UnauthorizedException(
+        'Identifiants invalides ou session expirée',
+      );
     }
     if (
       [
@@ -650,7 +718,7 @@ export class AuthService {
     }
     if (code === 'CONFIGURATION_NOT_FOUND') {
       throw new ServiceUnavailableException(
-        'Firebase Authentication n\'est pas configuré pour ce projet. Activez l\'authentification Email/Mot de passe dans Firebase Console et vérifiez que FIREBASE_WEB_API_KEY appartient à FIREBASE_PROJECT_ID.',
+        "Firebase Authentication n'est pas configuré pour ce projet. Activez l'authentification Email/Mot de passe dans Firebase Console et vérifiez que FIREBASE_WEB_API_KEY appartient à FIREBASE_PROJECT_ID.",
       );
     }
     throw new ServiceUnavailableException(
@@ -708,5 +776,436 @@ export class AuthService {
       throw new BadRequestException(`${field} is required`);
     }
     return value.trim();
+  }
+
+  async googleStatusV2(
+    rawToken: unknown,
+  ): Promise<{ registered: false } | { registered: true; user: AuthProfile }> {
+    const identity = await this.verifyGoogleIdentity(rawToken);
+    const userRef = this.firebase
+      .getFirestore()
+      .collection('users')
+      .doc(identity.uid);
+    const snapshot = await userRef.get();
+    if (!snapshot.exists) {
+      await this.assertNoOtherEmailAccount(identity.uid, identity.email!);
+      return { registered: false };
+    }
+    const user = snapshot.data() as User;
+    this.assertAccountCanSignIn(user);
+    if (user.email!.toLowerCase() !== identity.email!.toLowerCase()) {
+      throw new ConflictException(
+        'Ce compte possède une autre adresse e-mail. Contactez le support.',
+      );
+    }
+    await userRef.update({
+      lastLoginAt: new Date(),
+      emailVerified: true,
+      updatedAt: new Date(),
+    });
+    return {
+      registered: true,
+      user: this.toProfile({ ...user, emailVerified: true }),
+    };
+  }
+
+  async googleCompleteV2(
+    rawToken: unknown,
+    role: unknown,
+  ): Promise<{ user: AuthProfile }> {
+    const identity = await this.verifyGoogleIdentity(rawToken);
+    if (role !== AccountRole.PATIENT && role !== AccountRole.DOCTOR) {
+      throw new BadRequestException('Choisissez le profil Patient ou Médecin.');
+    }
+    const db = this.firebase.getFirestore();
+    const ref = db.collection('users').doc(identity.uid);
+    const doctorRef = db.collection('doctorProfiles').doc(identity.uid);
+    const email = identity.email!.trim().toLowerCase();
+    await this.assertNoOtherEmailAccount(identity.uid, email);
+    const firebaseUser = await this.firebase.getAuth().getUser(identity.uid);
+    const parts = (firebaseUser.displayName ?? '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    const firstName = parts[0]?.slice(0, 80) || 'Utilisateur';
+    const lastName = parts.slice(1).join(' ').slice(0, 80);
+    const now = new Date();
+    const user: User = {
+      id: identity.uid,
+      firstName,
+      lastName,
+      role,
+      email,
+      phone: firebaseUser.phoneNumber ?? '',
+      specialty: null,
+      registrationNumber: null,
+      status:
+        role === AccountRole.DOCTOR
+          ? AccountStatus.PENDING
+          : AccountStatus.ACTIVE,
+      emailVerified: true,
+      phoneVerified: Boolean(firebaseUser.phoneNumber),
+      lastLoginAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await db.runTransaction(async (tx) => {
+      const [existing, doctorProfile] = await Promise.all([
+        tx.get(ref),
+        role === AccountRole.DOCTOR ? tx.get(doctorRef) : Promise.resolve(null),
+      ]);
+      if (existing.exists) {
+        throw new ConflictException(
+          'Ce compte est déjà inscrit. Reconnectez-vous avec Google.',
+        );
+      }
+      if (doctorProfile?.exists)
+        throw new ConflictException('Un profil médecin existe déjà.');
+      tx.create(ref, user);
+      if (role === AccountRole.DOCTOR) {
+        const profile: DoctorProfile = {
+          id: identity.uid,
+          userId: identity.uid,
+          fullName: `${firstName} ${lastName}`.trim(),
+          registrationNumber: '',
+          bio: '',
+          yearsOfExperience: 0,
+          consultationFee: 0,
+          currency: 'XAF',
+          defaultAppointmentDurationMinutes: 30,
+          professionalAddress: null,
+          verificationStatus: DoctorVerificationStatus.PENDING,
+          verifiedAt: null,
+          createdAt: now,
+          updatedAt: now,
+        };
+        tx.create(doctorRef, profile);
+      }
+    });
+    return { user: this.toProfile(user) };
+  }
+
+  async registerV2(request: RegisterUserRequest): Promise<AuthSession> {
+    if (!request || typeof request !== 'object' || Array.isArray(request)) {
+      throw new BadRequestException('A registration object is required');
+    }
+
+    const firstName = this.requireText(request.firstName, 'firstName');
+    const lastName = this.requireText(request.lastName, 'lastName');
+    const phone = this.requireText(request.phone, 'phone');
+    const email = this.requireText(request.email, 'email').toLowerCase();
+    if (typeof request.password !== 'string' || request.password.length < 8) {
+      throw new BadRequestException(
+        'password must contain at least 8 characters',
+      );
+    }
+    if (
+      request.role !== AccountRole.PATIENT &&
+      request.role !== AccountRole.DOCTOR
+    ) {
+      throw new BadRequestException(
+        'Only patient or doctor roles can register',
+      );
+    }
+    if (
+      request.specialty !== undefined &&
+      typeof request.specialty !== 'string'
+    ) {
+      throw new BadRequestException('specialty must be a string');
+    }
+    if (
+      request.registrationNumber !== undefined &&
+      typeof request.registrationNumber !== 'string'
+    ) {
+      throw new BadRequestException('registrationNumber must be a string');
+    }
+
+    const tokens = await this.identityRequest<IdentityTokenResponse>(
+      'accounts:signUp',
+      {
+        email,
+        password: request.password,
+        returnSecureToken: true,
+      },
+    );
+    const identity = this.readTokens(tokens);
+    const uid = tokens.localId;
+    if (!uid) {
+      throw new ServiceUnavailableException(
+        "Firebase Authentication n'a retourné aucun identifiant utilisateur",
+      );
+    }
+
+    const firestore = this.firebase.getFirestore();
+    const userRef = firestore.collection('users').doc(uid);
+    const doctorProfileRef = firestore.collection('doctorProfiles').doc(uid);
+    const now = new Date();
+    const user: User = {
+      id: uid,
+      firstName,
+      lastName,
+      role: request.role,
+      status:
+        request.role === AccountRole.DOCTOR
+          ? AccountStatus.PENDING
+          : AccountStatus.ACTIVE,
+      email,
+      phone,
+      specialty:
+        request.role === AccountRole.DOCTOR
+          ? request.specialty?.trim() || null
+          : null,
+      registrationNumber:
+        request.role === AccountRole.DOCTOR
+          ? request.registrationNumber?.trim() || null
+          : null,
+      emailVerified: false,
+      phoneVerified: false,
+      lastLoginAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    let profileCreated = false;
+    try {
+      await firestore.runTransaction(async (transaction) => {
+        const existingUser = await transaction.get(userRef);
+        if (existingUser.exists) {
+          throw new ConflictException('Ce compte Firebase est déjà enregistré');
+        }
+        const existingDoctorProfile =
+          request.role === AccountRole.DOCTOR
+            ? await transaction.get(doctorProfileRef)
+            : null;
+        if (existingDoctorProfile?.exists) {
+          throw new ConflictException(
+            'Un profil professionnel existe déjà pour ce compte',
+          );
+        }
+        transaction.create(userRef, user);
+        if (request.role === AccountRole.DOCTOR) {
+          const doctorProfile: DoctorProfile = {
+            id: uid,
+            userId: uid,
+            fullName: `${firstName} ${lastName}`.trim(),
+            registrationNumber: user.registrationNumber ?? '',
+            bio: '',
+            yearsOfExperience: 0,
+            consultationFee: 0,
+            currency: 'XAF',
+            defaultAppointmentDurationMinutes: 30,
+            professionalAddress: null,
+            verificationStatus: DoctorVerificationStatus.PENDING,
+            verifiedAt: null,
+            createdAt: now,
+            updatedAt: now,
+          };
+          transaction.create(doctorProfileRef, doctorProfile);
+        }
+      });
+      profileCreated = true;
+
+      await this.identityRequest('accounts:sendOobCode', {
+        requestType: 'VERIFY_EMAIL',
+        idToken: identity.idToken,
+      });
+    } catch (error) {
+      if (!(error instanceof ConflictException)) {
+        try {
+          if (profileCreated) {
+            await Promise.all([
+              userRef.delete(),
+              request.role === AccountRole.DOCTOR
+                ? doctorProfileRef.delete()
+                : Promise.resolve(),
+            ]);
+          }
+          await this.firebase.getAuth().deleteUser(uid);
+        } catch (cleanupError) {
+          this.logger.error(
+            `Failed to clean up Firebase account ${uid} after registration failure`,
+            cleanupError instanceof Error ? cleanupError.stack : undefined,
+          );
+          throw new ServiceUnavailableException(
+            "L'inscription a échoué et le compte Firebase n'a pas pu être annulé",
+          );
+        }
+      }
+      throw error;
+    }
+
+    return {
+      user: this.toProfile(user),
+      ...identity,
+    };
+  }
+
+  async loginV2(request: LoginRequest): Promise<AuthSession> {
+    if (!request || typeof request !== 'object' || Array.isArray(request)) {
+      throw new BadRequestException('A login object is required');
+    }
+    const email = this.requireText(request.email, 'email').toLowerCase();
+    if (typeof request.password !== 'string' || request.password.length === 0) {
+      throw new BadRequestException('password is required');
+    }
+
+    const response = await this.identityRequest<IdentityTokenResponse>(
+      'accounts:signInWithPassword',
+      {
+        email,
+        password: request.password,
+        returnSecureToken: true,
+      },
+    );
+    const identity = this.readTokens(response);
+    const decoded = await this.verifyToken(identity.idToken);
+    if (!decoded.email_verified) {
+      throw new ForbiddenException(
+        'Votre adresse e-mail n’a pas encore été vérifiée. Consultez votre boîte de réception et cliquez sur le lien de confirmation avant de vous connecter.',
+      );
+    }
+
+    const user = await this.getStoredUser(decoded.uid);
+    this.assertAccountCanSignIn(user);
+    const updates: Partial<User> = {
+      lastLoginAt: new Date(),
+      updatedAt: new Date(),
+      email: decoded.email ?? user.email,
+      emailVerified: decoded.email_verified ?? false,
+    };
+    if (decoded.phone_number) {
+      updates.phone = decoded.phone_number;
+      updates.phoneVerified = true;
+    }
+
+    await this.firebase
+      .getFirestore()
+      .collection('users')
+      .doc(decoded.uid)
+      .update(updates);
+
+    return {
+      user: this.toProfile({ ...user, ...updates }),
+      ...identity,
+    };
+  }
+
+  async refreshV2(request: RefreshRequest): Promise<AuthSession> {
+    if (
+      !request ||
+      typeof request !== 'object' ||
+      typeof request.refreshToken !== 'string' ||
+      request.refreshToken.trim().length === 0
+    ) {
+      throw new BadRequestException('refreshToken is required');
+    }
+
+    const response = await this.identityRefreshRequest(request.refreshToken);
+    const identity = this.readTokens(response);
+    const decoded = await this.verifyToken(identity.idToken);
+    const user = await this.getStoredUser(decoded.uid);
+    this.assertAccountCanSignIn(user);
+
+    return {
+      user: this.toProfile(user),
+      ...identity,
+    };
+  }
+
+  async resetPasswordV2(
+    request: ResetPasswordRequest,
+  ): Promise<{ message: string }> {
+    if (!request || typeof request !== 'object') {
+      throw new BadRequestException('An email is required');
+    }
+    const email = this.requireText(request.email, 'email').toLowerCase();
+
+    try {
+      await this.identityRequest('accounts:sendOobCode', {
+        requestType: 'PASSWORD_RESET',
+        email,
+      });
+    } catch (error) {
+      if (!(error instanceof UnauthorizedException)) {
+        throw error;
+      }
+    }
+
+    return {
+      message: 'If this account exists, a password reset email has been sent.',
+    };
+  }
+
+  async getProfileV2(
+    firebaseUser: Pick<DecodedIdToken, 'uid'>,
+  ): Promise<AuthProfileResponse> {
+    const user = await this.getStoredUser(firebaseUser.uid);
+    const patientSnapshot = await this.firebase
+      .getFirestore()
+      .collection('patients')
+      .doc(firebaseUser.uid)
+      .get();
+    const patient = patientSnapshot.exists
+      ? (patientSnapshot.data() as PatientProfile)
+      : null;
+
+    return {
+      user: this.toProfile(user),
+      patient: {
+        id: patient?.id ?? firebaseUser.uid,
+        fullName:
+          patient?.fullName ?? `${user.firstName} ${user.lastName}`.trim(),
+        dateOfBirth: patient?.dateOfBirth ?? null,
+        gender: patient?.gender ?? Gender.UNDISCLOSED,
+        bloodType: patient?.bloodType ?? BloodType.UNKNOWN,
+        verified: false,
+        address: null,
+      },
+    };
+  }
+
+  async updateAdminProfileV2(
+    uid: string,
+    body: UpdateAdminProfileRequest,
+  ): Promise<{ user: AuthProfile }> {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new BadRequestException('Profile data is required');
+    }
+    const firstName = this.requireText(body.firstName, 'firstName');
+    const lastName = this.requireText(body.lastName, 'lastName');
+    const phone = this.requireText(body.phone, 'phone');
+    if (firstName.length > 80 || lastName.length > 80 || phone.length > 30) {
+      throw new BadRequestException('Profile fields exceed maximum length');
+    }
+    if (!/^[+0-9() .-]{6,30}$/.test(phone)) {
+      throw new BadRequestException('Invalid phone number');
+    }
+    const ref = this.firebase.getFirestore().collection('users').doc(uid);
+    await this.firebase.getFirestore().runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists) throw new NotFoundException('Account not found');
+      const user = snapshot.data() as User;
+      if (
+        user.role !== AccountRole.ADMIN ||
+        user.status !== AccountStatus.ACTIVE
+      ) {
+        throw new ForbiddenException(
+          'Seul un administrateur actif peut modifier ce profil',
+        );
+      }
+      transaction.update(ref, {
+        firstName,
+        lastName,
+        phone,
+        updatedAt: new Date(),
+      });
+    });
+    const updated = await this.getStoredUser(uid);
+    return { user: this.toProfile(updated) };
+  }
+
+  async logoutV2(firebaseUser: DecodedIdToken): Promise<{ message: string }> {
+    await this.firebase.getAuth().revokeRefreshTokens(firebaseUser.uid);
+    return { message: 'Firebase sessions revoked' };
   }
 }

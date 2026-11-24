@@ -67,7 +67,9 @@ function localDateParts(date: Date, timeZone: string) {
     }).formatToParts(date);
     return Object.fromEntries(parts.map(({ type, value }) => [type, value]));
   } catch {
-    throw new BadRequestException('Le fuseau horaire doit être un fuseau horaire IANA valide');
+    throw new BadRequestException(
+      'Le fuseau horaire doit être un fuseau horaire IANA valide',
+    );
   }
 }
 
@@ -99,7 +101,9 @@ export class AppointmentsService {
       !request.doctorId.trim() ||
       !Object.values(ConsultationMode).includes(request.consultationMode)
     ) {
-      throw new BadRequestException('Un médecin et un mode de consultation sont requis');
+      throw new BadRequestException(
+        'Un médecin et un mode de consultation sont requis',
+      );
     }
     if (
       typeof request.scheduledAt !== 'string' ||
@@ -112,11 +116,15 @@ export class AppointmentsService {
     }
     const scheduledAt = new Date(request.scheduledAt);
     if (scheduledAt.getTime() <= Date.now()) {
-      throw new BadRequestException('Le rendez-vous doit être programmé dans le futur');
+      throw new BadRequestException(
+        'Le rendez-vous doit être programmé dans le futur',
+      );
     }
     const reason = request.reason?.trim() ?? '';
     if (reason.length > 500) {
-      throw new BadRequestException('La raison doit contenir 500 caractères ou moins');
+      throw new BadRequestException(
+        'La raison doit contenir 500 caractères ou moins',
+      );
     }
     const localDate = localDateParts(scheduledAt, request.timeZone);
     const weekday = localDate.weekday.toLowerCase();
@@ -134,7 +142,9 @@ export class AppointmentsService {
       (userSnapshot.data() as User).role !== AccountRole.PATIENT ||
       (userSnapshot.data() as User).status !== AccountStatus.ACTIVE
     ) {
-      throw new ForbiddenException('Seuls les patients peuvent demander des rendez-vous');
+      throw new ForbiddenException(
+        'Seuls les patients peuvent demander des rendez-vous',
+      );
     }
     if (!doctorSnapshot.exists) {
       throw new NotFoundException('Médecin introuvable');
@@ -159,33 +169,39 @@ export class AppointmentsService {
         ? doctor.defaultAppointmentDurationMinutes
         : 30;
 
-    const [modesSnapshot, availabilitySnapshot, blockedDatesSnapshot, addressSnapshot] =
-      await Promise.all([
-        firestore
-          .collection('doctorConsultationModes')
-          .where('doctorProfileId', '==', request.doctorId)
-          .get(),
-        firestore
-          .collection('doctorWeeklyAvailabilities')
-          .where('doctorProfileId', '==', request.doctorId)
-          .get(),
-        firestore
-          .collection('doctorBlockedDates')
-          .where('doctorProfileId', '==', request.doctorId)
-          .get(),
-        request.consultationMode === ConsultationMode.HOME
-          ? firestore
-              .collection('addresses')
-              .where('userId', '==', firebaseUser.uid)
-              .get()
-          : Promise.resolve(null),
-      ]);
+    const [
+      modesSnapshot,
+      availabilitySnapshot,
+      blockedDatesSnapshot,
+      addressSnapshot,
+    ] = await Promise.all([
+      firestore
+        .collection('doctorConsultationModes')
+        .where('doctorProfileId', '==', request.doctorId)
+        .get(),
+      firestore
+        .collection('doctorWeeklyAvailabilities')
+        .where('doctorProfileId', '==', request.doctorId)
+        .get(),
+      firestore
+        .collection('doctorBlockedDates')
+        .where('doctorProfileId', '==', request.doctorId)
+        .get(),
+      request.consultationMode === ConsultationMode.HOME
+        ? firestore
+            .collection('addresses')
+            .where('userId', '==', firebaseUser.uid)
+            .get()
+        : Promise.resolve(null),
+    ]);
 
     const modes = modesSnapshot.docs.map(
       (document) => (document.data() as DoctorConsultationMode).mode,
     );
     if (!modes.includes(request.consultationMode)) {
-      throw new BadRequestException('Ce médecin ne propose pas ce mode de consultation');
+      throw new BadRequestException(
+        'Ce médecin ne propose pas ce mode de consultation',
+      );
     }
     const availability = availabilitySnapshot.docs
       .map((document) => document.data() as DoctorWeeklyAvailability)
@@ -195,21 +211,30 @@ export class AppointmentsService {
           slot.weekday === weekday &&
           slot.startTime <= time &&
           time < slot.endTime &&
-          (Number(localDate.hour) * 60 + Number(localDate.minute) + durationMinutes) <=
-            (Number(slot.endTime.slice(0, 2)) * 60 +
-              Number(slot.endTime.slice(3, 5))),
+          Number(localDate.hour) * 60 +
+            Number(localDate.minute) +
+            durationMinutes <=
+            Number(slot.endTime.slice(0, 2)) * 60 +
+              Number(slot.endTime.slice(3, 5)),
       );
     if (!availability) {
-      throw new BadRequestException("Le médecin n'est pas disponible à l'heure sélectionnée");
+      throw new BadRequestException(
+        "Le médecin n'est pas disponible à l'heure sélectionnée",
+      );
     }
     const isBlocked = blockedDatesSnapshot.docs.some((document) => {
       const blockedDate = document.data().date as Date | Timestamp;
-      return `${localDateParts(asDate(blockedDate), request.timeZone).year}-${
-        localDateParts(asDate(blockedDate), request.timeZone).month
-      }-${localDateParts(asDate(blockedDate), request.timeZone).day}` === localDay;
+      return (
+        `${localDateParts(asDate(blockedDate), request.timeZone).year}-${
+          localDateParts(asDate(blockedDate), request.timeZone).month
+        }-${localDateParts(asDate(blockedDate), request.timeZone).day}` ===
+        localDay
+      );
     });
     if (isBlocked) {
-      throw new BadRequestException('Le médecin est indisponible à la date sélectionnée');
+      throw new BadRequestException(
+        'Le médecin est indisponible à la date sélectionnée',
+      );
     }
     const primaryAddress = addressSnapshot?.docs.find(
       (document) => document.data().isPrimary === true,
@@ -262,11 +287,14 @@ export class AppointmentsService {
         }
         const existingStart = asDate(existing.scheduledAt).getTime();
         const existingEnd =
-          existingStart + (existing.durationMinutes || durationMinutes) * 60_000;
+          existingStart +
+          (existing.durationMinutes || durationMinutes) * 60_000;
         return scheduledAt.getTime() < existingEnd && endTime > existingStart;
       });
       if (hasConflict) {
-        throw new BadRequestException('Ce créneau de rendez-vous n\'est plus disponible');
+        throw new BadRequestException(
+          "Ce créneau de rendez-vous n'est plus disponible",
+        );
       }
       transaction.create(appointmentRef, appointment);
     });
@@ -289,7 +317,9 @@ export class AppointmentsService {
     return { id: appointment.id, status: appointment.status };
   }
 
-  async listMine(firebaseUser: DecodedIdToken): Promise<PatientAppointmentView[]> {
+  async listMine(
+    firebaseUser: DecodedIdToken,
+  ): Promise<PatientAppointmentView[]> {
     const firestore = this.firebase.getFirestore();
     const patientSnapshot = await firestore
       .collection('patients')
@@ -304,7 +334,9 @@ export class AppointmentsService {
       .get();
     const appointments = await Promise.all(
       snapshot.docs.map(async (document) => {
-        const appointment = document.data() as Appointment & { reason?: string | null };
+        const appointment = document.data() as Appointment & {
+          reason?: string | null;
+        };
         const doctorSnapshot = await firestore
           .collection('doctorProfiles')
           .doc(appointment.doctorProfileId)
@@ -338,7 +370,10 @@ export class AppointmentsService {
       }),
     );
     return appointments
-      .filter((appointment): appointment is PatientAppointmentView => appointment !== null)
+      .filter(
+        (appointment): appointment is PatientAppointmentView =>
+          appointment !== null,
+      )
       .sort(
         (left, right) =>
           new Date(left.scheduledAt).getTime() -
@@ -348,10 +383,16 @@ export class AppointmentsService {
 
   async getMyReview(uid: string, appointmentId: string) {
     const db = this.firebase.getFirestore();
-    const appointment = await db.collection('appointments').doc(appointmentId).get();
+    const appointment = await db
+      .collection('appointments')
+      .doc(appointmentId)
+      .get();
     const patient = await db.collection('patients').doc(uid).get();
     const patientProfileId = (patient.data()?.id as string | undefined) ?? uid;
-    if (!appointment.exists || appointment.data()?.patientProfileId !== patientProfileId) {
+    if (
+      !appointment.exists ||
+      appointment.data()?.patientProfileId !== patientProfileId
+    ) {
       throw new NotFoundException('Rendez-vous introuvable');
     }
     const existing = await db.collection('reviews').doc(appointmentId).get();
@@ -360,43 +401,76 @@ export class AppointmentsService {
     if (review?.patientProfileId !== patientProfileId) {
       throw new NotFoundException('Avis introuvable');
     }
-    return {id: existing.id, rating: Number(review.rating), comment: review.comment ?? null};
+    return {
+      id: existing.id,
+      rating: Number(review.rating),
+      comment: review.comment ?? null,
+    };
   }
 
-  async submitReview(uid: string, appointmentId: string, body: {
-    rating: number; comment?: string | null;
-  }) {
-    if (!body || !Number.isInteger(body.rating) || body.rating < 1 || body.rating > 5 ||
-      (body.comment !== undefined && body.comment !== null &&
-        (typeof body.comment !== 'string' || body.comment.length > 2000))) {
+  async submitReview(
+    uid: string,
+    appointmentId: string,
+    body: {
+      rating: number;
+      comment?: string | null;
+    },
+  ) {
+    if (
+      !body ||
+      !Number.isInteger(body.rating) ||
+      body.rating < 1 ||
+      body.rating > 5 ||
+      (body.comment !== undefined &&
+        body.comment !== null &&
+        (typeof body.comment !== 'string' || body.comment.length > 2000))
+    ) {
       throw new BadRequestException('Note ou commentaire invalide');
     }
     const db = this.firebase.getFirestore();
     const appointmentRef = db.collection('appointments').doc(appointmentId);
     const reviewRef = db.collection('reviews').doc(appointmentId);
     const patientSnapshot = await db.collection('patients').doc(uid).get();
-    const patientProfileId = (patientSnapshot.data()?.id as string | undefined) ?? uid;
-    await db.runTransaction(async transaction => {
+    const patientProfileId =
+      (patientSnapshot.data()?.id as string | undefined) ?? uid;
+    await db.runTransaction(async (transaction) => {
       const [appointmentSnapshot, previousReview] = await Promise.all([
-        transaction.get(appointmentRef), transaction.get(reviewRef),
+        transaction.get(appointmentRef),
+        transaction.get(reviewRef),
       ]);
-      if (!appointmentSnapshot.exists || appointmentSnapshot.data()?.patientProfileId !== patientProfileId) {
+      if (
+        !appointmentSnapshot.exists ||
+        appointmentSnapshot.data()?.patientProfileId !== patientProfileId
+      ) {
         throw new NotFoundException('Rendez-vous introuvable');
       }
       const appointment = appointmentSnapshot.data() as Appointment;
       if (appointment.status !== AppointmentStatus.COMPLETED) {
-        throw new BadRequestException('Seule une consultation terminée peut être évaluée');
+        throw new BadRequestException(
+          'Seule une consultation terminée peut être évaluée',
+        );
       }
-      if (previousReview.exists) throw new BadRequestException('Un avis existe déjà pour ce rendez-vous');
+      if (previousReview.exists)
+        throw new BadRequestException(
+          'Un avis existe déjà pour ce rendez-vous',
+        );
       const now = new Date();
       transaction.create(reviewRef, {
-        id: appointmentId, appointmentId, patientProfileId,
+        id: appointmentId,
+        appointmentId,
+        patientProfileId,
         doctorProfileId: appointment.doctorProfileId,
-        rating: body.rating, comment: body.comment?.trim() || null,
-        createdAt: now, updatedAt: now,
+        rating: body.rating,
+        comment: body.comment?.trim() || null,
+        createdAt: now,
+        updatedAt: now,
       });
     });
-    return {id: appointmentId, rating: body.rating, comment: body.comment?.trim() || null};
+    return {
+      id: appointmentId,
+      rating: body.rating,
+      comment: body.comment?.trim() || null,
+    };
   }
 
   async getMine(
@@ -436,7 +510,9 @@ export class AppointmentsService {
     return doctorDocument.id;
   }
 
-  async listDoctor(firebaseUser: DecodedIdToken): Promise<DoctorAppointmentView[]> {
+  async listDoctor(
+    firebaseUser: DecodedIdToken,
+  ): Promise<DoctorAppointmentView[]> {
     const doctorProfileId = await this.resolveDoctorProfileId(firebaseUser.uid);
     const firestore = this.firebase.getFirestore();
     const snapshot = await firestore
@@ -478,7 +554,8 @@ export class AppointmentsService {
               .get();
             if (addressSnapshot.exists) {
               district =
-                (addressSnapshot.data() as { district?: string }).district ?? null;
+                (addressSnapshot.data() as { district?: string }).district ??
+                null;
             }
           }
         }
@@ -551,6 +628,517 @@ export class AppointmentsService {
     }
 
     return { id, status };
+  }
+
+  async listMineV2(
+    firebaseUser: DecodedIdToken,
+  ): Promise<PatientAppointmentView[]> {
+    const firestore = this.firebase.getFirestore();
+    const patientSnapshot = await firestore
+      .collection('patients')
+      .doc(firebaseUser.uid)
+      .get();
+    const patientId = patientSnapshot.exists
+      ? ((patientSnapshot.data() as { id?: string }).id ?? firebaseUser.uid)
+      : firebaseUser.uid;
+    const snapshot = await firestore
+      .collection('appointments')
+      .where('patientProfileId', '==', patientId)
+      .get();
+    const appointments = await Promise.all(
+      snapshot.docs.map(async (document) => {
+        const appointment = document.data() as Appointment & {
+          reason?: string | null;
+        };
+        const doctorSnapshot = await firestore
+          .collection('doctorProfiles')
+          .doc(appointment.doctorProfileId)
+          .get();
+        if (!doctorSnapshot.exists) return null;
+        const doctor = doctorSnapshot.data() as DoctorProfile;
+        const userSnapshot = await firestore
+          .collection('users')
+          .doc(doctor.userId)
+          .get();
+        if (!userSnapshot.exists) return null;
+        const user = userSnapshot.data() as User;
+        return {
+          id: document.id,
+          doctor: {
+            id: appointment.doctorProfileId,
+            name:
+              doctor.fullName?.trim() ||
+              `${user.firstName} ${user.lastName}`.trim(),
+            specialty: user.specialty ?? 'Spécialité non renseignée',
+            professionalAddress: doctor.professionalAddress ?? null,
+          },
+          scheduledAt: asDate(appointment.scheduledAt).toISOString(),
+          durationMinutes: appointment.durationMinutes,
+          consultationMode: appointment.consultationMode,
+          status: appointment.status,
+          fee: appointment.fee,
+          currency: appointment.currency,
+          reason: appointment.reason ?? null,
+        };
+      }),
+    );
+    return appointments
+      .filter(
+        (appointment): appointment is PatientAppointmentView =>
+          appointment !== null,
+      )
+      .sort(
+        (left, right) =>
+          new Date(left.scheduledAt).getTime() -
+          new Date(right.scheduledAt).getTime(),
+      );
+  }
+
+  async listDoctorV2(
+    firebaseUser: DecodedIdToken,
+  ): Promise<DoctorAppointmentView[]> {
+    const doctorProfileId = await this.resolveDoctorProfileId(firebaseUser.uid);
+    const firestore = this.firebase.getFirestore();
+    const snapshot = await firestore
+      .collection('appointments')
+      .where('doctorProfileId', '==', doctorProfileId)
+      .get();
+
+    const views: DoctorAppointmentView[] = [];
+    for (const document of snapshot.docs) {
+      const data = document.data() as Appointment & { reason?: string | null };
+      const scheduledAt =
+        data.scheduledAt instanceof Timestamp
+          ? data.scheduledAt.toDate()
+          : data.scheduledAt;
+
+      let patient = 'Patient';
+      let district: string | null = null;
+      let mode = 'À domicile';
+
+      try {
+        const patientSnapshot = await firestore
+          .collection('patientProfiles')
+          .doc(data.patientProfileId)
+          .get();
+        if (patientSnapshot.exists) {
+          const patientProfile = patientSnapshot.data() as PatientProfile;
+          const userSnapshot = await firestore
+            .collection('users')
+            .doc(patientProfile.userId ?? data.patientProfileId)
+            .get();
+          if (userSnapshot.exists) {
+            const user = userSnapshot.data() as User;
+            patient = `${user.firstName} ${user.lastName}`.trim() || patient;
+          }
+          if (data.addressId) {
+            const addressSnapshot = await firestore
+              .collection('addresses')
+              .doc(data.addressId)
+              .get();
+            if (addressSnapshot.exists) {
+              district =
+                (addressSnapshot.data() as { district?: string }).district ??
+                null;
+            }
+          }
+        }
+      } catch {
+        // Ignorer les erreurs de chargement patient.
+      }
+
+      switch (data.consultationMode) {
+        case ConsultationMode.TELECONSULTATION:
+          mode = 'Téléconsultation';
+          break;
+        case ConsultationMode.HOME:
+        default:
+          mode = 'À domicile';
+      }
+
+      views.push({
+        id: document.id,
+        date: asLocalDateString(scheduledAt),
+        time: asLocalTimeString(scheduledAt),
+        patient,
+        district,
+        mode,
+        status: data.status,
+      });
+    }
+
+    views.sort(
+      (left, right) =>
+        new Date(`${left.date}T${left.time}`).getTime() -
+        new Date(`${right.date}T${right.time}`).getTime(),
+    );
+
+    return views;
+  }
+
+  async getMyReviewV2(uid: string, appointmentId: string) {
+    const db = this.firebase.getFirestore();
+    const appointment = await db
+      .collection('appointments')
+      .doc(appointmentId)
+      .get();
+    const patient = await db.collection('patients').doc(uid).get();
+    const patientProfileId = (patient.data()?.id as string | undefined) ?? uid;
+    if (
+      !appointment.exists ||
+      appointment.data()?.patientProfileId !== patientProfileId
+    ) {
+      throw new NotFoundException('Rendez-vous introuvable');
+    }
+    const existing = await db.collection('reviews').doc(appointmentId).get();
+    if (!existing.exists) return null;
+    const review = existing.data();
+    if (review?.patientProfileId !== patientProfileId) {
+      throw new NotFoundException('Avis introuvable');
+    }
+    return {
+      id: existing.id,
+      rating: Number(review.rating),
+      comment: review.comment ?? null,
+    };
+  }
+
+  async submitReviewV2(
+    uid: string,
+    appointmentId: string,
+    body: {
+      rating: number;
+      comment?: string | null;
+    },
+  ) {
+    if (
+      !body ||
+      !Number.isInteger(body.rating) ||
+      body.rating < 1 ||
+      body.rating > 5 ||
+      (body.comment !== undefined &&
+        body.comment !== null &&
+        (typeof body.comment !== 'string' || body.comment.length > 2000))
+    ) {
+      throw new BadRequestException('Note ou commentaire invalide');
+    }
+    const db = this.firebase.getFirestore();
+    const appointmentRef = db.collection('appointments').doc(appointmentId);
+    const reviewRef = db.collection('reviews').doc(appointmentId);
+    const patientSnapshot = await db.collection('patients').doc(uid).get();
+    const patientProfileId =
+      (patientSnapshot.data()?.id as string | undefined) ?? uid;
+    await db.runTransaction(async (transaction) => {
+      const [appointmentSnapshot, previousReview] = await Promise.all([
+        transaction.get(appointmentRef),
+        transaction.get(reviewRef),
+      ]);
+      if (
+        !appointmentSnapshot.exists ||
+        appointmentSnapshot.data()?.patientProfileId !== patientProfileId
+      ) {
+        throw new NotFoundException('Rendez-vous introuvable');
+      }
+      const appointment = appointmentSnapshot.data() as Appointment;
+      if (appointment.status !== AppointmentStatus.COMPLETED) {
+        throw new BadRequestException(
+          'Seule une consultation terminée peut être évaluée',
+        );
+      }
+      if (previousReview.exists)
+        throw new BadRequestException(
+          'Un avis existe déjà pour ce rendez-vous',
+        );
+      const now = new Date();
+      transaction.create(reviewRef, {
+        id: appointmentId,
+        appointmentId,
+        patientProfileId,
+        doctorProfileId: appointment.doctorProfileId,
+        rating: body.rating,
+        comment: body.comment?.trim() || null,
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+    return {
+      id: appointmentId,
+      rating: body.rating,
+      comment: body.comment?.trim() || null,
+    };
+  }
+
+  async getMineV2(
+    firebaseUser: DecodedIdToken,
+    id: string,
+  ): Promise<PatientAppointmentView> {
+    const appointments = await this.listMine(firebaseUser);
+    const appointment = appointments.find((item) => item.id === id);
+    if (!appointment) throw new NotFoundException('Rendez-vous introuvable');
+    return appointment;
+  }
+
+  async updateStatusV2(
+    firebaseUser: DecodedIdToken,
+    id: string,
+    status: AppointmentStatus,
+  ): Promise<{ id: string; status: AppointmentStatus }> {
+    const doctorProfileId = await this.resolveDoctorProfileId(firebaseUser.uid);
+    const firestore = this.firebase.getFirestore();
+
+    const appointmentRef = firestore.collection('appointments').doc(id);
+    const appointmentSnapshot = await appointmentRef.get();
+    if (!appointmentSnapshot.exists) {
+      throw new NotFoundException('Rendez-vous introuvable');
+    }
+    const appointment = appointmentSnapshot.data() as Appointment;
+    if (appointment.doctorProfileId !== doctorProfileId) {
+      throw new ForbiddenException('Ce rendez-vous ne vous appartient pas.');
+    }
+
+    await appointmentRef.update({
+      status,
+      updatedAt: new Date(),
+    });
+
+    try {
+      await this.notifications.publish({
+        userId: appointment.patientProfileId,
+        type: NotificationType.APPOINTMENT_UPDATED,
+        title: 'Votre rendez-vous a été mis à jour',
+        body: `Le statut de votre rendez-vous est passé à "${status}".`,
+        targetUrl: '/patient/rendez-vous',
+      });
+    } catch {
+      // Ne pas faire échouer la mise à jour si la notification échoue.
+    }
+
+    return { id, status };
+  }
+
+  async createV2(
+    firebaseUser: DecodedIdToken,
+    request: CreateAppointmentRequest,
+  ): Promise<{ id: string; status: AppointmentStatus }> {
+    if (
+      typeof request.doctorId !== 'string' ||
+      !request.doctorId.trim() ||
+      !Object.values(ConsultationMode).includes(request.consultationMode)
+    ) {
+      throw new BadRequestException(
+        'Un médecin et un mode de consultation sont requis',
+      );
+    }
+    if (
+      typeof request.scheduledAt !== 'string' ||
+      Number.isNaN(Date.parse(request.scheduledAt))
+    ) {
+      throw new BadRequestException('scheduledAt doit être une date valide');
+    }
+    if (typeof request.timeZone !== 'string' || !request.timeZone.trim()) {
+      throw new BadRequestException('Le fuseau horaire est requis');
+    }
+    const scheduledAt = new Date(request.scheduledAt);
+    if (scheduledAt.getTime() <= Date.now()) {
+      throw new BadRequestException(
+        'Le rendez-vous doit être programmé dans le futur',
+      );
+    }
+    const reason = request.reason?.trim() ?? '';
+    if (reason.length > 500) {
+      throw new BadRequestException(
+        'La raison doit contenir 500 caractères ou moins',
+      );
+    }
+    const localDate = localDateParts(scheduledAt, request.timeZone);
+    const weekday = localDate.weekday.toLowerCase();
+    const time = `${localDate.hour}:${localDate.minute}`;
+    const localDay = `${localDate.year}-${localDate.month}-${localDate.day}`;
+
+    const firestore = this.firebase.getFirestore();
+    const [userSnapshot, patientSnapshot, doctorSnapshot] = await Promise.all([
+      firestore.collection('users').doc(firebaseUser.uid).get(),
+      firestore.collection('patients').doc(firebaseUser.uid).get(),
+      firestore.collection('doctorProfiles').doc(request.doctorId).get(),
+    ]);
+    if (
+      !userSnapshot.exists ||
+      (userSnapshot.data() as User).role !== AccountRole.PATIENT ||
+      (userSnapshot.data() as User).status !== AccountStatus.ACTIVE
+    ) {
+      throw new ForbiddenException(
+        'Seuls les patients peuvent demander des rendez-vous',
+      );
+    }
+    if (!doctorSnapshot.exists) {
+      throw new NotFoundException('Médecin introuvable');
+    }
+    const doctor = doctorSnapshot.data() as DoctorProfile;
+    if (doctor.verificationStatus !== DoctorVerificationStatus.VERIFIED) {
+      throw new NotFoundException('Médecin vérifié introuvable');
+    }
+    const doctorUserSnapshot = await firestore
+      .collection('users')
+      .doc(doctor.userId)
+      .get();
+    if (
+      !doctorUserSnapshot.exists ||
+      (doctorUserSnapshot.data() as User).status !== AccountStatus.ACTIVE
+    ) {
+      throw new NotFoundException('Médecin vérifié introuvable');
+    }
+    const durationMinutes =
+      Number.isSafeInteger(doctor.defaultAppointmentDurationMinutes) &&
+      doctor.defaultAppointmentDurationMinutes > 0
+        ? doctor.defaultAppointmentDurationMinutes
+        : 30;
+
+    const [
+      modesSnapshot,
+      availabilitySnapshot,
+      blockedDatesSnapshot,
+      addressSnapshot,
+    ] = await Promise.all([
+      firestore
+        .collection('doctorConsultationModes')
+        .where('doctorProfileId', '==', request.doctorId)
+        .get(),
+      firestore
+        .collection('doctorWeeklyAvailabilities')
+        .where('doctorProfileId', '==', request.doctorId)
+        .get(),
+      firestore
+        .collection('doctorBlockedDates')
+        .where('doctorProfileId', '==', request.doctorId)
+        .get(),
+      request.consultationMode === ConsultationMode.HOME
+        ? firestore
+            .collection('addresses')
+            .where('userId', '==', firebaseUser.uid)
+            .get()
+        : Promise.resolve(null),
+    ]);
+
+    const modes = modesSnapshot.docs.map(
+      (document) => (document.data() as DoctorConsultationMode).mode,
+    );
+    if (!modes.includes(request.consultationMode)) {
+      throw new BadRequestException(
+        'Ce médecin ne propose pas ce mode de consultation',
+      );
+    }
+    const availability = availabilitySnapshot.docs
+      .map((document) => document.data() as DoctorWeeklyAvailability)
+      .find(
+        (slot) =>
+          slot.isAvailable &&
+          slot.weekday === weekday &&
+          slot.startTime <= time &&
+          time < slot.endTime &&
+          Number(localDate.hour) * 60 +
+            Number(localDate.minute) +
+            durationMinutes <=
+            Number(slot.endTime.slice(0, 2)) * 60 +
+              Number(slot.endTime.slice(3, 5)),
+      );
+    if (!availability) {
+      throw new BadRequestException(
+        "Le médecin n'est pas disponible à l'heure sélectionnée",
+      );
+    }
+    const isBlocked = blockedDatesSnapshot.docs.some((document) => {
+      const blockedDate = document.data().date as Date | Timestamp;
+      return (
+        `${localDateParts(asDate(blockedDate), request.timeZone).year}-${
+          localDateParts(asDate(blockedDate), request.timeZone).month
+        }-${localDateParts(asDate(blockedDate), request.timeZone).day}` ===
+        localDay
+      );
+    });
+    if (isBlocked) {
+      throw new BadRequestException(
+        'Le médecin est indisponible à la date sélectionnée',
+      );
+    }
+    const primaryAddress = addressSnapshot?.docs.find(
+      (document) => document.data().isPrimary === true,
+    );
+    if (request.consultationMode === ConsultationMode.HOME && !primaryAddress) {
+      throw new BadRequestException(
+        'Add a primary address to your profile before requesting a home visit',
+      );
+    }
+
+    const endTime = scheduledAt.getTime() + durationMinutes * 60_000;
+    const appointments = firestore
+      .collection('appointments')
+      .where('doctorProfileId', '==', request.doctorId);
+    const appointmentRef = firestore.collection('appointments').doc();
+    const now = new Date();
+    const appointment: Appointment & { reason: string | null } = {
+      id: appointmentRef.id,
+      patientProfileId: patientSnapshot.exists
+        ? ((patientSnapshot.data() as { id?: string }).id ?? firebaseUser.uid)
+        : firebaseUser.uid,
+      doctorProfileId: request.doctorId,
+      needId: null,
+      proposalId: null,
+      status: AppointmentStatus.PENDING_CONFIRMATION,
+      consultationMode: request.consultationMode,
+      scheduledAt,
+      durationMinutes,
+      fee: doctor.consultationFee,
+      currency: doctor.currency || 'XAF',
+      addressId: primaryAddress
+        ? ((primaryAddress.data() as { id?: string }).id ?? primaryAddress.id)
+        : null,
+      cancellationReason: null,
+      completedAt: null,
+      reason: reason || null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await firestore.runTransaction(async (transaction) => {
+      const existingAppointments = await transaction.get(appointments);
+      const hasConflict = existingAppointments.docs.some((document) => {
+        const existing = document.data() as Appointment;
+        if (
+          existing.status !== AppointmentStatus.PENDING_CONFIRMATION &&
+          existing.status !== AppointmentStatus.CONFIRMED
+        ) {
+          return false;
+        }
+        const existingStart = asDate(existing.scheduledAt).getTime();
+        const existingEnd =
+          existingStart +
+          (existing.durationMinutes || durationMinutes) * 60_000;
+        return scheduledAt.getTime() < existingEnd && endTime > existingStart;
+      });
+      if (hasConflict) {
+        throw new BadRequestException(
+          "Ce créneau de rendez-vous n'est plus disponible",
+        );
+      }
+      transaction.create(appointmentRef, appointment);
+    });
+
+    try {
+      await this.notifications.publish({
+        userId: doctor.userId,
+        type: NotificationType.APPOINTMENT_UPDATED,
+        title: 'Nouvelle demande de rendez-vous',
+        body: 'Un patient vous a envoyé une demande de rendez-vous.',
+        targetUrl: '/medecin/rendez-vous',
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to create notification for appointment ${appointment.id}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+
+    return { id: appointment.id, status: appointment.status };
   }
 }
 

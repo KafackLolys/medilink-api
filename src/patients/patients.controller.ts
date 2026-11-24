@@ -69,5 +69,48 @@ export class PatientsController {
   ): Promise<void> {
     await this.patientsService.deleteMyDocument(request.firebaseUser.uid, id);
   }
-}
 
+  // V2 route copies
+
+  @Get('v2/me/conditions')
+  listMyConditionsV2(@Req() request: AuthenticatedRequest) {
+    return this.patientsService.listMyConditionsV2(request.firebaseUser.uid);
+  }
+
+  @Get('v2/me/documents')
+  listMyDocumentsV2(@Req() request: AuthenticatedRequest) {
+    return this.patientsService.listMyDocumentsV2(request.firebaseUser.uid);
+  }
+
+  @Post('v2/me/documents')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_DOCUMENT_SIZE, files: 1 },
+    }),
+  )
+  uploadMyDocumentV2(
+    @Req() request: AuthenticatedRequest,
+    @Body('type') type: string,
+    @Body('title') title?: string,
+    @UploadedFile() file?: UploadedPatientDocument,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Un fichier de document est requis');
+    }
+    return this.patientsService.uploadMyDocumentV2(
+      request.firebaseUser.uid,
+      type,
+      file,
+      title,
+    );
+  }
+
+  @Delete('v2/me/documents/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async deleteMyDocumentV2(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+  ): Promise<void> {
+    await this.patientsService.deleteMyDocumentV2(request.firebaseUser.uid, id);
+  }
+}

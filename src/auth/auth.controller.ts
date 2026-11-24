@@ -83,4 +83,66 @@ export class AuthController {
   logout(@Req() request: AuthenticatedRequest) {
     return this.authService.logout(request.firebaseUser);
   }
+
+  // V2 route copies
+
+  @Post('v2/google/status')
+  @HttpCode(HttpStatus.OK)
+  googleStatusV2(@Body() body: { idToken?: unknown }) {
+    return this.authService.googleStatusV2(body?.idToken);
+  }
+
+  @Post('v2/google/complete')
+  @HttpCode(HttpStatus.OK)
+  googleCompleteV2(@Body() body: { idToken?: unknown; role?: unknown }) {
+    return this.authService.googleCompleteV2(body?.idToken, body?.role);
+  }
+
+  @Post('v2/register')
+  registerV2(@Body() body: RegisterUserRequest) {
+    return this.authService.registerV2(body);
+  }
+
+  @Post('v2/login')
+  @HttpCode(HttpStatus.OK)
+  loginV2(@Body() body: LoginRequest) {
+    return this.authService.loginV2(body);
+  }
+
+  @Post('v2/refresh')
+  @HttpCode(HttpStatus.OK)
+  refreshV2(@Body() body: RefreshRequest) {
+    return this.authService.refreshV2(body);
+  }
+
+  @Post('v2/reset-password')
+  @HttpCode(HttpStatus.OK)
+  resetPasswordV2(@Body() body: ResetPasswordRequest) {
+    return this.authService.resetPasswordV2(body);
+  }
+
+  @Get('v2/profile')
+  @UseGuards(FirebaseAuthGuard)
+  getProfileV2(@Req() request: AuthenticatedRequest) {
+    return this.authService.getProfileV2(request.firebaseUser);
+  }
+
+  @Patch('v2/admin/profile')
+  @UseGuards(FirebaseAuthGuard)
+  updateAdminProfileV2(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: UpdateAdminProfileRequest,
+  ) {
+    return this.authService.updateAdminProfileV2(
+      request.firebaseUser.uid,
+      body,
+    );
+  }
+
+  @Post('v2/logout')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(FirebaseAuthGuard)
+  logoutV2(@Req() request: AuthenticatedRequest) {
+    return this.authService.logoutV2(request.firebaseUser);
+  }
 }
