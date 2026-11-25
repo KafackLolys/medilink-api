@@ -258,8 +258,12 @@ export class MessagesService {
         title: isDoctor
           ? 'Nouveau message de votre médecin'
           : 'Nouveau message d’un patient',
-        body: 'Vous avez reçu un nouveau message.',
+        body: message.body,
         targetUrl: `${isDoctor ? '/patient/profil?activeContent=messages&tab=messages&' : '/medecin/messages?'}conversation=${context.id}`,
+        data: {
+          conversationId: context.id,
+          messageId,
+        },
       });
     } catch (error) {
       this.logger.error(
@@ -531,6 +535,37 @@ export class MessagesService {
       })
       .filter((item): item is MessageItem => item !== null);
     return { items };
+  }
+
+  async markConversationReadV2(
+    firebaseUser: DecodedIdToken,
+    id: string,
+  ): Promise<{ conversationId: string; updated: number; readAt: string }> {
+    const context = await this.getConversationContext(firebaseUser.uid, id);
+    const messages = this.firebase
+      .getFirestore()
+      .collection('conversations')
+      .doc(context.id)
+      .collection('messages');
+    const received = await messages
+      .where('receiverUserId', '==', firebaseUser.uid)
+      .get();
+    const unread = received.docs.filter((document) => !document.data().readAt);
+    const readAt = new Date();
+
+    for (let offset = 0; offset < unread.length; offset += 450) {
+      const batch = this.firebase.getFirestore().batch();
+      for (const document of unread.slice(offset, offset + 450)) {
+        batch.update(document.ref, { readAt });
+      }
+      await batch.commit();
+    }
+
+    return {
+      conversationId: context.id,
+      updated: unread.length,
+      readAt: readAt.toISOString(),
+    };
   }
 
   async sendMessageV2(
