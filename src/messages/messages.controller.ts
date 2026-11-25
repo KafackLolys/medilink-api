@@ -60,7 +60,7 @@ export class MessagesController {
   }
 
   @Patch('v2/conversations/:id/read')
-  markConversationReadV2(
+  async markConversationReadV2(
     @Req() request: AuthenticatedRequest,
     @Param('id') conversationId: string,
   ) {
@@ -70,7 +70,7 @@ export class MessagesController {
   }
 
   @Post('v2/conversations/:id')
-  sendMessageV2(
+  async sendMessageV2(
     @Req() request: AuthenticatedRequest,
     @Param('id') conversationId: string,
     @Body() body: { body?: unknown },
