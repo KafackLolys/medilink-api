@@ -168,6 +168,27 @@ export class MessagesService {
       await batch.commit();
     }
 
+    const notificationSnapshot = await this.firebase
+      .getFirestore()
+      .collection('notifications')
+      .where('conversationId', '==', context.id)
+      .get();
+    const unreadNotifications = notificationSnapshot.docs.filter(
+      (document) =>
+        document.data().userId === firebaseUser.uid && !document.data().readAt,
+    );
+    for (
+      let offset = 0;
+      offset < unreadNotifications.length;
+      offset += 450
+    ) {
+      const batch = this.firebase.getFirestore().batch();
+      for (const document of unreadNotifications.slice(offset, offset + 450)) {
+        batch.update(document.ref, { readAt: now, updatedAt: now });
+      }
+      await batch.commit();
+    }
+
     const items = snapshot.docs
       .reverse()
       .map((document) => {
