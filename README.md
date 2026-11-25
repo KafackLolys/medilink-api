@@ -312,3 +312,20 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+
+## Notifications push via Novu pour Flutter
+
+Le backend conserve deux transports distincts pour éviter de modifier le comportement des autres clients :
+
+- Les appareils enregistrés avec `pushProvider: "firebase"` (valeur par défaut, notamment pour le client Android natif existant) continuent à recevoir les messages par Firebase Admin.
+- Les appareils Flutter s'enregistrent avec `pushProvider: "novu"`. Le backend associe leurs tokens FCM au subscriber Novu dont l'identifiant est le Firebase UID authentifié, puis déclenche le workflow Novu lors de la publication d'une notification.
+
+Variables serveur à configurer dans l'environnement de déploiement ou dans le fichier local `.env` :
+
+- `NOVU_API_BASE_URL` : origine HTTPS de l'API Novu, sans `/v1` et distincte de l'URL du tableau de bord.
+- `NOVU_SECRET_KEY` : clé API secrète du même environnement Novu que l'intégration FCM et le workflow.
+- `NOVU_WORKFLOW_ID` : identifiant du workflow Push générique MediLink.
+- `NOVU_FCM_INTEGRATION_IDENTIFIER` : facultatif lorsqu'une seule intégration FCM est active.
+
+Ne jamais exposer ces valeurs dans l'application Flutter ou dans un fichier d'environnement frontend. L'intégration FCM Novu doit utiliser le compte de service du projet Firebase MediLink. Le workflow doit lire `payload.title` et `payload.body` ; les champs `notificationId`, `type`, `targetUrl` et les données métier sont également transmis.
