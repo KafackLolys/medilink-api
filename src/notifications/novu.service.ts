@@ -128,7 +128,7 @@ export class NovuService {
     const lastName =
       typeof claims.family_name === 'string'
         ? claims.family_name
-        : fullName.split(/\\s+/).slice(1).join(' ');
+        : fullName.split(/\s+/).slice(1).join(' ');
 
     const subscriber: Record<string, unknown> = { subscriberId };
     if (typeof claims.email === 'string' && claims.email.trim()) {
