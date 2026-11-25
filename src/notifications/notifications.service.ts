@@ -306,15 +306,6 @@ export class NotificationsService {
         typeof device.token === 'string' &&
         device.token.length > 0,
     );
-    const tokens = [
-      ...new Set(
-        deviceRecords
-          .filter((device) => device.pushProvider !== 'novu')
-          .map((device) => device.token)
-          .filter((token): token is string => typeof token === 'string'),
-      ),
-    ];
-
     if (hasNovuDevice) {
       try {
         await this.novu.triggerNotification(notification.userId, {
@@ -362,7 +353,7 @@ export class NotificationsService {
       // Compatibility alias consumed by existing web notification handlers.
       url: notification.targetUrl ?? '/',
       title: notification.title,
-      body: notification.body,
+      body: notification.body.slice(0, 700),
       ...notification.data,
     };
 
