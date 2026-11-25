@@ -58,6 +58,7 @@ export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   publishConversationRead(conversationId: string, readerUserId: string, readAt: string): void {
     this.server.to(this.conversationRoom(conversationId)).emit('message:read', { conversationId, readerUserId, readAt });
+    this.server.to(this.userRoom(readerUserId)).emit('conversation:read', { conversationId, readerUserId, readAt, unreadCount: 0 });
   }
 
   private conversationRoom(id: string): string { return `conversation:${id}`; }
