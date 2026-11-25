@@ -350,6 +350,8 @@ export class NotificationsService {
         data: {
           notificationId: id,
           type: notification.type,
+          targetUrl: notification.targetUrl ?? '/',
+          // Compatibility alias consumed by existing web notification handlers.
           url: notification.targetUrl ?? '/',
           title: notification.title,
           body: isMessage ? notification.body.slice(0, 700) : notification.body,
