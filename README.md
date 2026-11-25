@@ -128,11 +128,13 @@ configuration error rather than passing incomplete credentials to Firebase.
 
 Copiez le modèle puis complétez les valeurs privées avant de démarrer l'API :
 
-```bash
-cp .env.example .env
+```powershell
+Copy-Item .env.example .env
 npm install
 npm run start:dev
 ```
+
+Avec Bash, utilisez plutôt `cp .env.example .env`.
 
 `FIREBASE_PROJECT_ID` doit être `medilink-2027`. Renseignez ensemble `FIREBASE_CLIENT_EMAIL` et `FIREBASE_PRIVATE_KEY` depuis le compte de service Firebase (ou utilisez Application Default Credentials avec `GOOGLE_APPLICATION_CREDENTIALS`). `FIREBASE_WEB_API_KEY` est la clé Web publique du même projet Firebase et reste nécessaire aux opérations Firebase Authentication par e-mail/mot de passe.
 
