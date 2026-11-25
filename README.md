@@ -123,6 +123,21 @@ on Google Cloud, use the workload's attached service account instead. If only
 some `FIREBASE_*` service-account values are set, startup fails with a
 configuration error rather than passing incomplete credentials to Firebase.
 
+
+### Configuration locale du backend
+
+Copiez le modèle puis complétez les valeurs privées avant de démarrer l'API :
+
+```bash
+cp .env.example .env
+npm install
+npm run start:dev
+```
+
+`FIREBASE_PROJECT_ID` doit être `medilink-2027`. Renseignez ensemble `FIREBASE_CLIENT_EMAIL` et `FIREBASE_PRIVATE_KEY` depuis le compte de service Firebase (ou utilisez Application Default Credentials avec `GOOGLE_APPLICATION_CREDENTIALS`). `FIREBASE_WEB_API_KEY` est la clé Web publique du même projet Firebase et reste nécessaire aux opérations Firebase Authentication par e-mail/mot de passe.
+
+Les trois variables `SUPABASE_*` sont nécessaires aux téléversements de documents médicaux ; créez le bucket privé `images` avant de les utiliser. Ne commitez jamais le fichier `.env`, la clé privée Firebase ou la clé `service_role` Supabase.
+
 ### Administrator accounts
 
 The first administrator must be provisioned once in Firebase Console because
