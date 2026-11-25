@@ -252,6 +252,9 @@ export class NotificationsService {
       title: notification.title,
       body: notification.body,
       targetUrl: notification.targetUrl ?? null,
+      ...(notification.data?.conversationId
+        ? { conversationId: notification.data.conversationId }
+        : {}),
       readAt: null,
       createdAt: now,
       updatedAt: now,
@@ -299,6 +302,12 @@ export class NotificationsService {
         ...(isMessage
           ? {
               android: { priority: 'high' as const },
+              webpush: {
+                notification: {
+                  title: notification.title,
+                  body: notification.body.slice(0, 700),
+                },
+              },
               apns: {
                 headers: { 'apns-priority': '10' },
                 payload: {
