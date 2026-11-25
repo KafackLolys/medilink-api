@@ -551,6 +551,15 @@ export class MessagesService {
       .where('receiverUserId', '==', firebaseUser.uid)
       .get();
     const unread = received.docs.filter((document) => !document.data().readAt);
+    const notificationSnapshot = await this.firebase
+      .getFirestore()
+      .collection('notifications')
+      .where('conversationId', '==', context.id)
+      .get();
+    const unreadNotifications = notificationSnapshot.docs.filter(
+      (document) =>
+        document.data().userId === firebaseUser.uid && !document.data().readAt,
+    );
     const readAt = new Date();
 
     for (let offset = 0; offset < unread.length; offset += 450) {
@@ -561,9 +570,22 @@ export class MessagesService {
       await batch.commit();
     }
 
+    for (
+      let offset = 0;
+      offset < unreadNotifications.length;
+      offset += 450
+    ) {
+      const batch = this.firebase.getFirestore().batch();
+      for (const document of unreadNotifications.slice(offset, offset + 450)) {
+        batch.update(document.ref, { readAt, updatedAt: readAt });
+      }
+      await batch.commit();
+    }
+
     return {
       conversationId: context.id,
       updated: unread.length,
+      notificationsUpdated: unreadNotifications.length,
       readAt: readAt.toISOString(),
     };
   }
