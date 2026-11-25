@@ -225,12 +225,17 @@ export class NovuService {
         name: this.workflowId,
         to: [subscriberId],
         payload: {
+          // Canonical cross-platform notification contract.
           notificationId: notification.notificationId,
           type: notification.type,
           title: notification.title,
           body: notification.body,
           targetUrl: notification.targetUrl,
-          ...notification.data,
+          // Keep url as a compatibility alias for existing web clients.
+          url: notification.targetUrl,
+          ...(notification.data ?? {}),
+          // Preserve structured metadata for clients that prefer a nested object.
+          data: notification.data ?? {},
         },
       });
     } catch (error) {
