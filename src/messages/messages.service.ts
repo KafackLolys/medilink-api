@@ -540,7 +540,12 @@ export class MessagesService {
   async markConversationReadV2(
     firebaseUser: DecodedIdToken,
     id: string,
-  ): Promise<{ conversationId: string; updated: number; readAt: string }> {
+  ): Promise<{
+    conversationId: string;
+    updated: number;
+    notificationsUpdated: number;
+    readAt: string;
+  }> {
     const context = await this.getConversationContext(firebaseUser.uid, id);
     const messages = this.firebase
       .getFirestore()
