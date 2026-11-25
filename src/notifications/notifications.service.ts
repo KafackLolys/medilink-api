@@ -333,71 +333,99 @@ export class NotificationsService {
       }
     }
 
-    for (let offset = 0; offset < tokens.length; offset += 500) {
-      const chunk = tokens.slice(offset, offset + 500);
-      const isMessage = notification.type === NotificationType.NEW_MESSAGE;
-      // Keep the data-only FCM payload below Firebase's 4 KB limit, including UTF-8 text.
-      const message: MulticastMessage = {
-        tokens: chunk,
-        ...(isMessage
-          ? {}
-          : {
-              notification: {
-                title: notification.title,
-                body: notification.body,
-              },
-            }),
-        data: {
-          notificationId: id,
-          type: notification.type,
-          targetUrl: notification.targetUrl ?? '/',
-          // Compatibility alias consumed by existing web notification handlers.
-          url: notification.targetUrl ?? '/',
-          title: notification.title,
-          body: isMessage ? notification.body.slice(0, 700) : notification.body,
-          ...notification.data,
-        },
-        ...(isMessage
-          ? {
-              android: { priority: 'high' as const },
-              webpush: {
-                notification: {
-                  title: notification.title,
-                  body: notification.body.slice(0, 700),
-                },
-              },
-              apns: {
-                headers: { 'apns-priority': '10' },
-                payload: {
-                  aps: {
-                    alert: {
-                      title: notification.title,
-                      body: notification.body.slice(0, 700),
-                    },
-                    sound: 'default',
-                  },
-                },
-              },
-            }
-          : {}),
-      };
-      try {
-        const response: BatchResponse = await this.firebase
-          .getMessaging()
-          .sendEachForMulticast(message);
-        await this.removeInvalidTokens(chunk, response.responses);
-        if (response.failureCount > 0) {
-          this.logger.warn(
-            `FCM delivery failed for ${response.failureCount} device(s) on notification ${id}`,
+    // Android Flutter devices must receive data-only FCM messages. If an FCM
+    // "notification" block is present, Android displays it itself in background
+    // and ignores the category icon selected by flutter_local_notifications.
+    // Web keeps a notification payload; Novu remains responsible for its devices.
+    const mobileTokens = [
+      ...new Set(
+        deviceRecords
+          .filter((device) => device.pushProvider !== 'novu')
+          .filter((device) => device.platform === 'mobile')
+          .map((device) => device.token)
+          .filter((token): token is string => typeof token === 'string'),
+      ),
+    ];
+    const webTokens = [
+      ...new Set(
+        deviceRecords
+          .filter((device) => device.pushProvider !== 'novu')
+          .filter((device) => device.platform === 'web')
+          .map((device) => device.token)
+          .filter((token): token is string => typeof token === 'string'),
+      ),
+    ];
+    const dataPayload = {
+      notificationId: id,
+      type: notification.type,
+      targetUrl: notification.targetUrl ?? '/',
+      // Compatibility alias consumed by existing web notification handlers.
+      url: notification.targetUrl ?? '/',
+      title: notification.title,
+      body: notification.body,
+      ...notification.data,
+    };
+
+    const sendChunks = async (
+      deviceTokens: string[],
+      buildMessage: (chunk: string[]) => MulticastMessage,
+    ): Promise<void> => {
+      for (let offset = 0; offset < deviceTokens.length; offset += 500) {
+        const chunk = deviceTokens.slice(offset, offset + 500);
+        try {
+          const response: BatchResponse = await this.firebase
+            .getMessaging()
+            .sendEachForMulticast(buildMessage(chunk));
+          await this.removeInvalidTokens(chunk, response.responses);
+          if (response.failureCount > 0) {
+            this.logger.warn(
+              `FCM delivery failed for ${response.failureCount} device(s) on notification ${id}`,
+            );
+          }
+        } catch (error) {
+          this.logger.error(
+            `FCM delivery failed for notification ${id}`,
+            error instanceof Error ? error.stack : undefined,
           );
         }
-      } catch (error) {
-        this.logger.error(
-          `FCM delivery failed for notification ${id}`,
-          error instanceof Error ? error.stack : undefined,
-        );
       }
-    }
+    };
+
+    await sendChunks(mobileTokens, (chunk) => ({
+      tokens: chunk,
+      // Deliberately no "notification" property: Flutter handles all Android
+      // categories in foreground, background and terminated app states.
+      data: dataPayload,
+      android: { priority: 'high' },
+      // Preserve native iOS alert presentation for Flutter mobile devices.
+      apns: {
+        headers: { 'apns-priority': '10' },
+        payload: {
+          aps: {
+            alert: {
+              title: notification.title,
+              body: notification.body.slice(0, 700),
+            },
+            sound: 'default',
+          },
+        },
+      },
+    }));
+
+    await sendChunks(webTokens, (chunk) => ({
+      tokens: chunk,
+      notification: {
+        title: notification.title,
+        body: notification.body,
+      },
+      data: dataPayload,
+      webpush: {
+        notification: {
+          title: notification.title,
+          body: notification.body.slice(0, 700),
+        },
+      },
+    }));
   }
 
   private async removeInvalidTokens(
