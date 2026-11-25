@@ -203,10 +203,7 @@ export class MessagesService {
           senderUserId: String(data.senderUserId ?? ''),
           body: data.body,
           sentAt: sentAt.toISOString(),
-          readAt:
-            data.receiverUserId === firebaseUser.uid && !data.readAt
-              ? now.toISOString()
-              : (asDate(data.readAt)?.toISOString() ?? null),
+          readAt: asDate(data.readAt)?.toISOString() ?? null,
         } satisfies MessageItem;
       })
       .filter((item): item is MessageItem => item !== null);
@@ -529,8 +526,6 @@ export class MessagesService {
       .doc(context.id)
       .collection('messages');
     const snapshot = await messages.orderBy('sentAt', 'desc').limit(100).get();
-    const now = new Date();
-
     const items = snapshot.docs
       .reverse()
       .map((document) => {
