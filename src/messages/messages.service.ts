@@ -295,6 +295,17 @@ export class MessagesService {
     return message;
   }
 
+  async getConversationParticipants(userId: string, id: string): Promise<{ doctorUserId: string; patientUserId: string }> {
+    const context = await this.getConversationContext(userId, id);
+    return { doctorUserId: context.doctorUserId, patientUserId: context.patientUserId };
+  }
+
+  async getUnreadCount(userId: string, id: string): Promise<number> {
+    await this.getConversationContext(userId, id);
+    const snapshot = await this.firebase.getFirestore().collection('conversations').doc(id).collection('messages').where('receiverUserId', '==', userId).get();
+    return snapshot.docs.filter((document) => !document.data().readAt).length;
+  }
+
   private async getConversationContext(
     userId: string,
     id: string,
@@ -517,22 +528,8 @@ export class MessagesService {
       .collection('conversations')
       .doc(context.id)
       .collection('messages');
-    const [snapshot, receivedMessages] = await Promise.all([
-      messages.orderBy('sentAt', 'desc').limit(100).get(),
-      messages.where('receiverUserId', '==', firebaseUser.uid).get(),
-    ]);
-    const unreadMessages = receivedMessages.docs.filter(
-      (document) => !document.data().readAt,
-    );
-
+    const snapshot = await messages.orderBy('sentAt', 'desc').limit(100).get();
     const now = new Date();
-    for (let offset = 0; offset < unreadMessages.length; offset += 450) {
-      const batch = this.firebase.getFirestore().batch();
-      for (const document of unreadMessages.slice(offset, offset + 450)) {
-        batch.update(document.ref, { readAt: now });
-      }
-      await batch.commit();
-    }
 
     const items = snapshot.docs
       .reverse()
