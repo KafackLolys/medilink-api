@@ -11,7 +11,7 @@ import {
   type MulticastMessage,
   type BatchResponse,
 } from 'firebase-admin/messaging';
-import type { Notification } from '../interfaces/database';
+import { NotificationType, type Notification } from '../interfaces/database';
 import { FirebaseService } from '../firebase/firebase.service';
 
 export type NotificationPlatform = 'web' | 'mobile';
@@ -276,7 +276,8 @@ export class NotificationsService {
     ];
     for (let offset = 0; offset < tokens.length; offset += 500) {
       const chunk = tokens.slice(offset, offset + 500);
-      const isMessage = notification.type === 'new_message';
+      const isMessage = notification.type === NotificationType.NEW_MESSAGE;
+      // Keep the data-only FCM payload below Firebase's 4 KB limit, including UTF-8 text.
       const message: MulticastMessage = {
         tokens: chunk,
         ...(isMessage
@@ -292,7 +293,7 @@ export class NotificationsService {
           type: notification.type,
           url: notification.targetUrl ?? '/',
           title: notification.title,
-          body: notification.body,
+          body: isMessage ? notification.body.slice(0, 700) : notification.body,
           ...notification.data,
         },
         ...(isMessage
@@ -304,7 +305,7 @@ export class NotificationsService {
                   aps: {
                     alert: {
                       title: notification.title,
-                      body: notification.body,
+                      body: notification.body.slice(0, 700),
                     },
                     sound: 'default',
                   },
