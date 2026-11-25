@@ -102,6 +102,13 @@ export class NovuService {
     }
 
     if (!response.ok) {
+      const errorBody = await response.text();
+
+      this.logger.error(
+        `Novu API error (${method} ${path}) HTTP ${response.status}: ${errorBody.slice(0, 1000)
+        }`,
+      );
+
       throw new NovuApiError(response.status, method, path);
     }
 
