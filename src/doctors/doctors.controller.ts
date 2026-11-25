@@ -41,6 +41,12 @@ export class DoctorsController {
     return this.doctorsService.getMine(request.firebaseUser.uid);
   }
 
+  // Keep this exact V2 collection path ahead of the legacy `:id` route.
+  @Get('v2')
+  listV2(@Query() filters: DoctorDirectoryFilters) {
+    return this.doctorsService.listV2(filters);
+  }
+
   @Get('me/reviews')
   listMyReviews(@Req() request: AuthenticatedRequest) {
     return this.doctorsService.listMyReviews(request.firebaseUser.uid);
@@ -96,11 +102,6 @@ export class DoctorsController {
   }
 
   // V2 route copies
-
-  @Get('v2')
-  listV2(@Query() filters: DoctorDirectoryFilters) {
-    return this.doctorsService.listV2(filters);
-  }
 
   @Get('v2/me')
   getMineV2(@Req() request: AuthenticatedRequest) {

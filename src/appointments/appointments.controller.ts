@@ -34,6 +34,12 @@ export class AppointmentsController {
     return this.appointmentsService.listDoctor(request.firebaseUser);
   }
 
+  // Keep the V2 collection route ahead of the legacy `:id` route.
+  @Get('v2')
+  listMineV2(@Req() request: AuthenticatedRequest) {
+    return this.appointmentsService.listMineV2(request.firebaseUser);
+  }
+
   @Get(':id/review')
   getMyReview(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
     return this.appointmentsService.getMyReview(request.firebaseUser.uid, id);
@@ -84,11 +90,6 @@ export class AppointmentsController {
   }
 
   // V2 route copies
-
-  @Get('v2')
-  listMineV2(@Req() request: AuthenticatedRequest) {
-    return this.appointmentsService.listMineV2(request.firebaseUser);
-  }
 
   @Get('v2/doctor')
   listDoctorV2(@Req() request: AuthenticatedRequest) {

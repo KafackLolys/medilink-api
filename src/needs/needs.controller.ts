@@ -39,6 +39,12 @@ export class NeedsController {
     return this.needsService.listMine(request.firebaseUser);
   }
 
+  // Keep the V2 collection route ahead of the legacy `:id` route.
+  @Get('v2')
+  listV2(@Req() request: AuthenticatedRequest) {
+    return this.needsService.listMineV2(request.firebaseUser);
+  }
+
   @Get('doctor')
   listForDoctor(
     @Req() request: AuthenticatedRequest,
@@ -160,11 +166,6 @@ export class NeedsController {
   }
 
   // V2 route copies
-
-  @Get('v2')
-  listV2(@Req() request: AuthenticatedRequest) {
-    return this.needsService.listMineV2(request.firebaseUser);
-  }
 
   @Get('v2/doctor')
   listForDoctorV2(

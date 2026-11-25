@@ -1148,6 +1148,14 @@ export class AuthService {
     const patient = patientSnapshot.exists
       ? (patientSnapshot.data() as PatientProfile)
       : null;
+    const patientId = patient?.id ?? firebaseUser.uid;
+    const addressSnapshot = await this.firebase
+      .getFirestore()
+      .collection('addresses')
+      .where('patientProfileId', '==', patientId)
+      .limit(1)
+      .get();
+    const addressData = addressSnapshot.docs[0]?.data();
 
     return {
       user: this.toProfile(user),
@@ -1159,7 +1167,12 @@ export class AuthService {
         gender: patient?.gender ?? Gender.UNDISCLOSED,
         bloodType: patient?.bloodType ?? BloodType.UNKNOWN,
         verified: false,
-        address: null,
+        address: addressData
+          ? {
+              city: String(addressData.city ?? ''),
+              district: String(addressData.district ?? ''),
+            }
+          : null,
       },
     };
   }
