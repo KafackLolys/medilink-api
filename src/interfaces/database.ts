@@ -428,6 +428,8 @@ export interface Notification extends Timestamped {
   title: string;
   body: string;
   targetUrl: string | null;
+  /** Conversation associated with message notifications, when applicable. */
+  conversationId?: string;
   readAt: Date | null;
 }
 

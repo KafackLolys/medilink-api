@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Req,
   UseGuards,
@@ -55,6 +56,17 @@ export class MessagesController {
     @Param('id') conversationId: string,
   ) {
     return this.messages.listMessagesV2(request.firebaseUser, conversationId);
+  }
+
+  @Patch('v2/conversations/:id/read')
+  markConversationReadV2(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') conversationId: string,
+  ) {
+    return this.messages.markConversationReadV2(
+      request.firebaseUser,
+      conversationId,
+    );
   }
 
   @Post('v2/conversations/:id')
