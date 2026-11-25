@@ -11,11 +11,12 @@ import {
 import type { AuthenticatedRequest } from '../auth/authenticated-request.interface';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
 import { MessagesService } from './messages.service';
+import { MessagesGateway } from './messages.gateway';
 
 @Controller('messages')
 @UseGuards(FirebaseAuthGuard)
 export class MessagesController {
-  constructor(private readonly messages: MessagesService) {}
+  constructor(private readonly messages: MessagesService, private readonly gateway: MessagesGateway) {}
 
   @Get('conversations')
   listConversations(@Req() request: AuthenticatedRequest) {
@@ -63,10 +64,9 @@ export class MessagesController {
     @Req() request: AuthenticatedRequest,
     @Param('id') conversationId: string,
   ) {
-    return this.messages.markConversationReadV2(
-      request.firebaseUser,
-      conversationId,
-    );
+    const result = await this.messages.markConversationReadV2(request.firebaseUser, conversationId);
+    this.gateway.publishConversationRead(conversationId, request.firebaseUser.uid, result.readAt);
+    return result;
   }
 
   @Post('v2/conversations/:id')
@@ -75,10 +75,11 @@ export class MessagesController {
     @Param('id') conversationId: string,
     @Body() body: { body?: unknown },
   ) {
-    return this.messages.sendMessageV2(
-      request.firebaseUser,
-      conversationId,
-      body?.body,
-    );
+    const message = await this.messages.sendMessageV2(request.firebaseUser, conversationId, body?.body);
+    const participants = await this.messages.getConversationParticipants(request.firebaseUser.uid, conversationId);
+    const recipientUserId = participants.doctorUserId === request.firebaseUser.uid ? participants.patientUserId : participants.doctorUserId;
+    const unreadCount = await this.messages.getUnreadCount(recipientUserId, conversationId);
+    this.gateway.publishNewMessage(conversationId, message, recipientUserId, unreadCount);
+    return message;
   }
 }
