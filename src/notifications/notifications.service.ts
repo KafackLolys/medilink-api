@@ -13,14 +13,18 @@ import {
 } from 'firebase-admin/messaging';
 import { NotificationType, type Notification } from '../interfaces/database';
 import { FirebaseService } from '../firebase/firebase.service';
+import { NovuService } from './novu.service';
 
 export type NotificationPlatform = 'web' | 'mobile';
+export type NotificationPushProvider = 'firebase' | 'novu';
 
 export interface RegisterNotificationDeviceRequest {
   deviceId: string;
   token: string;
   platform: NotificationPlatform;
   userAgent?: string;
+  /** Flutter uses Novu; legacy native/web clients keep direct Firebase delivery. */
+  pushProvider?: NotificationPushProvider;
 }
 
 export interface NotificationItem {
@@ -68,7 +72,10 @@ function toDate(value: unknown): Date | null {
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
-  constructor(private readonly firebase: FirebaseService) {}
+  constructor(
+    private readonly firebase: FirebaseService,
+    private readonly novu: NovuService,
+  ) {}
 
   async listForUser(
     firebaseUser: DecodedIdToken,
@@ -242,6 +249,28 @@ export class NotificationsService {
     return { removed: true };
   }
 
+  private async syncNovuDeviceTokens(
+    userId: string,
+    profile?: DecodedIdToken,
+    excludedDocumentPath?: string,
+  ): Promise<void> {
+    const snapshot = await this.firebase
+      .getFirestore()
+      .collection('notificationDevices')
+      .where('userId', '==', userId)
+      .get();
+    const tokens = [
+      ...new Set(
+        snapshot.docs
+          .filter((document) => document.ref.path !== excludedDocumentPath)
+          .filter((document) => document.data().pushProvider === 'novu')
+          .map((document) => document.data().token)
+          .filter((token): token is string => typeof token === 'string'),
+      ),
+    ];
+    await this.novu.syncSubscriberDeviceTokens(userId, tokens, profile);
+  }
+
   async publish(notification: PublishNotification): Promise<void> {
     const id = randomUUID();
     const now = new Date();
@@ -270,13 +299,40 @@ export class NotificationsService {
       .collection('notificationDevices')
       .where('userId', '==', notification.userId)
       .get();
+    const deviceRecords = devices.docs.map((document) => document.data());
+    const hasNovuDevice = deviceRecords.some(
+      (device) =>
+        device.pushProvider === 'novu' &&
+        typeof device.token === 'string' &&
+        device.token.length > 0,
+    );
     const tokens = [
       ...new Set(
-        devices.docs
-          .map((document) => document.data().token)
+        deviceRecords
+          .filter((device) => device.pushProvider !== 'novu')
+          .map((device) => device.token)
           .filter((token): token is string => typeof token === 'string'),
       ),
     ];
+
+    if (hasNovuDevice) {
+      try {
+        await this.novu.triggerNotification(notification.userId, {
+          notificationId: id,
+          type: notification.type,
+          title: notification.title,
+          body: notification.body,
+          targetUrl: notification.targetUrl ?? null,
+          data: notification.data,
+        });
+      } catch (error) {
+        this.logger.error(
+          `Novu delivery failed for notification ${id}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
+    }
+
     for (let offset = 0; offset < tokens.length; offset += 500) {
       const chunk = tokens.slice(offset, offset + 500);
       const isMessage = notification.type === NotificationType.NEW_MESSAGE;
@@ -486,7 +542,12 @@ export class NotificationsService {
   async registerDeviceV2(
     firebaseUser: DecodedIdToken,
     request: RegisterNotificationDeviceRequest,
-  ): Promise<{ deviceId: string; platform: NotificationPlatform }> {
+  ): Promise<{
+    deviceId: string;
+    platform: NotificationPlatform;
+    pushProvider: NotificationPushProvider;
+  }> {
+    const pushProvider = request?.pushProvider ?? 'firebase';
     if (
       !request ||
       typeof request !== 'object' ||
@@ -496,25 +557,41 @@ export class NotificationsService {
       request.token.length < 20 ||
       request.token.length > 4096 ||
       (request.platform !== 'web' && request.platform !== 'mobile') ||
+      (pushProvider !== 'firebase' && pushProvider !== 'novu') ||
       (request.userAgent !== undefined &&
         (typeof request.userAgent !== 'string' ||
           request.userAgent.length > 500))
     ) {
       throw new BadRequestException('Notification device details are invalid');
     }
+
     const firestore = this.firebase.getFirestore();
     const now = new Date();
     const deviceRef = firestore
       .collection('notificationDevices')
       .doc(`${firebaseUser.uid}_${request.deviceId}`);
+    const previousSnapshot = await deviceRef.get();
+    const previousProvider = previousSnapshot.data()?.pushProvider;
 
     const existingTokenDevices = await firestore
       .collection('notificationDevices')
       .where('token', '==', request.token)
       .get();
+    const affectedNovuUsers = new Set<string>();
+    if (previousProvider === 'novu' && pushProvider !== 'novu') {
+      affectedNovuUsers.add(firebaseUser.uid);
+    }
+
     const batch = firestore.batch();
     for (const document of existingTokenDevices.docs) {
       if (document.ref.path !== deviceRef.path) {
+        const existing = document.data();
+        if (
+          existing.pushProvider === 'novu' &&
+          typeof existing.userId === 'string'
+        ) {
+          affectedNovuUsers.add(existing.userId);
+        }
         batch.delete(document.ref);
       }
     }
@@ -524,6 +601,7 @@ export class NotificationsService {
         id: request.deviceId,
         userId: firebaseUser.uid,
         platform: request.platform,
+        pushProvider,
         token: request.token,
         userAgent: request.userAgent ?? null,
         lastUsedAt: now,
@@ -533,7 +611,18 @@ export class NotificationsService {
       { merge: true },
     );
     await batch.commit();
-    return { deviceId: request.deviceId, platform: request.platform };
+
+    if (pushProvider === 'novu') {
+      affectedNovuUsers.add(firebaseUser.uid);
+    }
+    for (const userId of affectedNovuUsers) {
+      await this.syncNovuDeviceTokens(
+        userId,
+        userId === firebaseUser.uid ? firebaseUser : undefined,
+      );
+    }
+
+    return { deviceId: request.deviceId, platform: request.platform, pushProvider };
   }
 
   async unregisterDeviceV2(
@@ -549,10 +638,17 @@ export class NotificationsService {
       .doc(`${firebaseUser.uid}_${deviceId}`);
     const snapshot = await reference.get();
     if (!snapshot.exists) return { removed: false };
-    if (snapshot.data()?.userId !== firebaseUser.uid) {
+    const device = snapshot.data();
+    if (device?.userId !== firebaseUser.uid) {
       throw new ForbiddenException(
         'Vous ne pouvez pas supprimer cet appareil de notification',
       );
+    }
+
+    if (device.pushProvider === 'novu') {
+      // Update Novu before deleting the Firestore record. If Novu is unavailable,
+      // the caller can retry without leaving a stale token attached to the subscriber.
+      await this.syncNovuDeviceTokens(firebaseUser.uid, undefined, reference.path);
     }
     await reference.delete();
     return { removed: true };
