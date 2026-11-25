@@ -467,20 +467,9 @@ export class NeedsService {
       throw new NotFoundException('Medical need not found');
     }
 
-    const existingProposals = await firestore
+    const proposalsQuery = firestore
       .collection('doctorProposals')
-      .where('needId', '==', needId)
-      .get();
-    if (
-      existingProposals.docs.some(
-        (document) =>
-          (document.data() as DoctorProposal).doctorProfileId === doctor.id,
-      )
-    ) {
-      throw new ConflictException(
-        'Vous avez déjà envoyé une proposition pour cette demande',
-      );
-    }
+      .where('needId', '==', needId);
 
     const proposalRef = firestore.collection('doctorProposals').doc();
     const now = new Date();
@@ -510,7 +499,10 @@ export class NeedsService {
     };
 
     await firestore.runTransaction(async (transaction) => {
-      const currentNeedSnapshot = await transaction.get(needRef);
+      const [currentNeedSnapshot, existingProposals] = await Promise.all([
+        transaction.get(needRef),
+        transaction.get(proposalsQuery),
+      ]);
       if (!currentNeedSnapshot.exists) {
         throw new NotFoundException('Medical need not found');
       }
@@ -526,6 +518,27 @@ export class NeedsService {
           'This request is no longer accepting proposals',
         );
       }
+
+      // A cancelled, rejected or expired proposal is historical: it must not
+      // prevent the same doctor from submitting a new proposal. Only an
+      // active proposal (pending/sent) or an accepted one blocks duplicates.
+      const hasBlockingProposal = existingProposals.docs.some((document) => {
+        const existing = document.data() as DoctorProposal;
+        return (
+          existing.doctorProfileId === doctor.id &&
+          [
+            ProposalStatus.PENDING,
+            ProposalStatus.SENT,
+            ProposalStatus.ACCEPTED,
+          ].includes(existing.status)
+        );
+      });
+      if (hasBlockingProposal) {
+        throw new ConflictException(
+          'Vous avez déjà une proposition active pour cette demande',
+        );
+      }
+
       transaction.create(proposalRef, newProposal);
       transaction.update(needRef, {
         status: NeedStatus.PROPOSALS_RECEIVED,
