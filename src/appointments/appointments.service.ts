@@ -241,7 +241,7 @@ export class AppointmentsService {
     );
     if (request.consultationMode === ConsultationMode.HOME && !primaryAddress) {
       throw new BadRequestException(
-        'Add a primary address to your profile before requesting a home visit',
+        'Ajoutez une adresse principale à votre profil avant de demander une visite à domicile.',
       );
     }
 
@@ -1065,7 +1065,7 @@ export class AppointmentsService {
     );
     if (request.consultationMode === ConsultationMode.HOME && !primaryAddress) {
       throw new BadRequestException(
-        'Add a primary address to your profile before requesting a home visit',
+        'Ajoutez une adresse principale à votre profil avant de demander une visite à domicile.',
       );
     }
 

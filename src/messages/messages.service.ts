@@ -520,6 +520,7 @@ export class MessagesService {
     id: string,
   ): Promise<{ items: MessageItem[] }> {
     const context = await this.getConversationContext(firebaseUser.uid, id);
+    const now = new Date();
     const messages = this.firebase
       .getFirestore()
       .collection('conversations')

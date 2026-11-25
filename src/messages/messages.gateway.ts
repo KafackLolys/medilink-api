@@ -9,24 +9,24 @@ type AuthenticatedSocket = Socket & { data: { userId?: string } };
 @WebSocketGateway({ cors: { origin: true, credentials: true }, transports: ['websocket', 'polling'] })
 export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server!: Server;
-  constructor(private readonly firebase: FirebaseService, private readonly messages: MessagesService) {}
+  constructor(private readonly firebase: FirebaseService, private readonly messages: MessagesService) { }
 
   async handleConnection(client: AuthenticatedSocket): Promise<void> {
     try {
       const token = client.handshake.auth?.token;
-      if (typeof token !== 'string' || !token.trim()) return client.disconnect(true);
+      if (typeof token !== 'string' || !token.trim()) { client.disconnect(true); return; }
       const decoded = await this.firebase.getAuth().verifyIdToken(token, true);
       const snapshot = await this.firebase.getFirestore().collection('users').doc(decoded.uid).get();
-      if (!snapshot.exists) return client.disconnect(true);
+      if (!snapshot.exists) { client.disconnect(true); return; }
       const user = snapshot.data() as User;
-      if (user.status === AccountStatus.SUSPENDED || user.status === AccountStatus.DELETED) return client.disconnect(true);
+      if (user.status === AccountStatus.SUSPENDED || user.status === AccountStatus.DELETED) { client.disconnect(true); return; }
       client.data.userId = decoded.uid;
       await client.join(this.userRoom(decoded.uid));
       client.emit('connection:ready', { userId: decoded.uid });
     } catch { client.disconnect(true); }
   }
 
-  handleDisconnect(_client: AuthenticatedSocket): void {}
+  handleDisconnect(_client: AuthenticatedSocket): void { }
 
   @SubscribeMessage('conversation:join')
   async joinConversation(@ConnectedSocket() client: AuthenticatedSocket, @MessageBody() body: { conversationId?: unknown }): Promise<{ joined: boolean }> {
