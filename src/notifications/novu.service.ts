@@ -25,6 +25,11 @@ class NovuApiError extends Error {
 export class NovuService {
   private readonly logger = new Logger(NovuService.name);
 
+  /**
+   * Accepts both a root API URL (https://host) and a reverse-proxy API
+   * context path (https://host/api). Novu self-hosted deployments commonly
+   * expose the API below API_CONTEXT_PATH; endpoint methods append /v1.
+   */
   private get apiBaseUrl(): string {
     return (process.env.NOVU_API_BASE_URL ?? '').trim().replace(/\/+$/, '');
   }
@@ -50,17 +55,23 @@ export class NovuService {
 
     try {
       const url = new URL(this.apiBaseUrl);
+      const normalizedPath = url.pathname.replace(/\/+$/, '');
       if (
         url.protocol !== 'https:' ||
-        url.pathname !== '/' ||
+        !url.hostname ||
         url.username ||
-        url.password
+        url.password ||
+        url.search ||
+        url.hash ||
+        normalizedPath.endsWith('/v1') ||
+        normalizedPath.includes('/../') ||
+        normalizedPath.includes('/./')
       ) {
         throw new Error('Invalid Novu API URL');
       }
     } catch {
       throw new ServiceUnavailableException(
-        'NOVU_API_BASE_URL doit être l’origine HTTPS de l’API Novu, sans suffixe /v1 ni URL du tableau de bord.',
+        'NOVU_API_BASE_URL doit être une URL HTTPS de l’API Novu (origine ou chemin de reverse proxy), sans suffixe /v1, paramètres ni URL du tableau de bord.',
       );
     }
   }
