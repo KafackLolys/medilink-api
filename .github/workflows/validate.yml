@@ -26,5 +26,7 @@ jobs:
         run: npm ci
       - name: Build
         run: npm run build
+      - name: Test notification routing
+        run: npm test -- --runInBand src/notifications/notifications.service.spec.ts
       - name: Lint
         run: npm run lint
