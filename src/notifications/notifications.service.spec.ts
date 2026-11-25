@@ -2,6 +2,7 @@ import { NotificationType } from '../interfaces/database';
 import { ForbiddenException } from '@nestjs/common';
 import { FirebaseService } from '../firebase/firebase.service';
 import { NotificationsService } from './notifications.service';
+import { NovuService } from './novu.service';
 
 describe('NotificationsService', () => {
   const createNotification = jest.fn();
@@ -9,10 +10,14 @@ describe('NotificationsService', () => {
   const updateNotification = jest.fn();
   const sendEachForMulticast = jest.fn();
   const getDevices = jest.fn();
+  const syncNovuTokens = jest.fn();
+  const triggerNovu = jest.fn();
   let service: NotificationsService;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    syncNovuTokens.mockResolvedValue(undefined);
+    triggerNovu.mockResolvedValue(undefined);
     getDevices.mockResolvedValue({
       docs: [
         { data: () => ({ token: 'fcm-token-device-one' }) },
@@ -41,10 +46,16 @@ describe('NotificationsService', () => {
         };
       },
     };
-    service = new NotificationsService({
-      getFirestore: () => firestore,
-      getMessaging: () => ({ sendEachForMulticast }),
-    } as unknown as FirebaseService);
+    service = new NotificationsService(
+      {
+        getFirestore: () => firestore,
+        getMessaging: () => ({ sendEachForMulticast }),
+      } as unknown as FirebaseService,
+      {
+        syncSubscriberDeviceTokens: syncNovuTokens,
+        triggerNotification: triggerNovu,
+      } as unknown as NovuService,
+    );
   });
 
   it('stores the internal notification and sends it to all registered devices', async () => {
@@ -68,6 +79,49 @@ describe('NotificationsService', () => {
       expect.objectContaining({
         tokens: ['fcm-token-device-one', 'fcm-token-device-two'],
       }),
+    );
+  });
+
+  it('routes Flutter devices through Novu while keeping direct FCM for other clients', async () => {
+    getDevices.mockResolvedValueOnce({
+      docs: [
+        {
+          data: () => ({
+            token: 'flutter-fcm-token',
+            pushProvider: 'novu',
+          }),
+        },
+        {
+          data: () => ({
+            token: 'native-fcm-token',
+            pushProvider: 'firebase',
+          }),
+        },
+      ],
+    });
+
+    await service.publish({
+      userId: 'patient-uid',
+      type: NotificationType.NEW_MESSAGE,
+      title: 'Nouveau message',
+      body: 'Vous avez reçu un message.',
+      targetUrl: '/patient/messages',
+      data: { conversationId: 'conversation-123' },
+    });
+
+    expect(triggerNovu).toHaveBeenCalledWith(
+      'patient-uid',
+      expect.objectContaining({
+        type: 'new_message',
+        title: 'Nouveau message',
+        data: { conversationId: 'conversation-123' },
+      }),
+    );
+    expect(sendEachForMulticast).toHaveBeenCalledWith(
+      expect.objectContaining({ tokens: ['native-fcm-token'] }),
+    );
+    expect(sendEachForMulticast).not.toHaveBeenCalledWith(
+      expect.objectContaining({ tokens: ['flutter-fcm-token'] }),
     );
   });
 
