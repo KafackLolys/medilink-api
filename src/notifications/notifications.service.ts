@@ -48,6 +48,7 @@ export interface PublishNotification {
   title: string;
   body: string;
   targetUrl?: string | null;
+  data?: Record<string, string>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -275,17 +276,42 @@ export class NotificationsService {
     ];
     for (let offset = 0; offset < tokens.length; offset += 500) {
       const chunk = tokens.slice(offset, offset + 500);
+      const isMessage = notification.type === 'new_message';
       const message: MulticastMessage = {
         tokens: chunk,
-        notification: {
-          title: notification.title,
-          body: notification.body,
-        },
+        ...(isMessage
+          ? {}
+          : {
+              notification: {
+                title: notification.title,
+                body: notification.body,
+              },
+            }),
         data: {
           notificationId: id,
           type: notification.type,
           url: notification.targetUrl ?? '/',
+          title: notification.title,
+          body: notification.body,
+          ...notification.data,
         },
+        ...(isMessage
+          ? {
+              android: { priority: 'high' as const },
+              apns: {
+                headers: { 'apns-priority': '10' },
+                payload: {
+                  aps: {
+                    alert: {
+                      title: notification.title,
+                      body: notification.body,
+                    },
+                    sound: 'default',
+                  },
+                },
+              },
+            }
+          : {}),
       };
       try {
         const response: BatchResponse = await this.firebase
