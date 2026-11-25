@@ -634,8 +634,12 @@ export class MessagesService {
         title: isDoctor
           ? 'Nouveau message de votre médecin'
           : 'Nouveau message d’un patient',
-        body: 'Vous avez reçu un nouveau message.',
+        body: message.body,
         targetUrl: `${isDoctor ? '/patient/profil?activeContent=messages&tab=messages&' : '/medecin/messages?'}conversation=${context.id}`,
+        data: {
+          conversationId: context.id,
+          messageId,
+        },
       });
     } catch (error) {
       this.logger.error(
