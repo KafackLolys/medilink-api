@@ -11,7 +11,7 @@ import {
   type MulticastMessage,
   type BatchResponse,
 } from 'firebase-admin/messaging';
-import { NotificationType, type Notification } from '../interfaces/database';
+import { type Notification } from '../interfaces/database';
 import { FirebaseService } from '../firebase/firebase.service';
 import { NovuService } from './novu.service';
 
