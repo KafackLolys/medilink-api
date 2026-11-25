@@ -26,7 +26,7 @@ export class NovuService {
   private readonly logger = new Logger(NovuService.name);
 
   private get apiBaseUrl(): string {
-    return (process.env.NOVU_API_BASE_URL ?? '').trim().replace(/\\/+$/, '');
+    return (process.env.NOVU_API_BASE_URL ?? '').trim().replace(/\/+$/, '');
   }
 
   private get secretKey(): string {
@@ -124,7 +124,7 @@ export class NovuService {
     const firstName =
       typeof claims.given_name === 'string'
         ? claims.given_name
-        : fullName.split(/\\s+/)[0] ?? '';
+        : fullName.split(/\s+/)[0] ?? '';
     const lastName =
       typeof claims.family_name === 'string'
         ? claims.family_name
