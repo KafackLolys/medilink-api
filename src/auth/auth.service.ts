@@ -1217,6 +1217,83 @@ export class AuthService {
     return { user: this.toProfile(updated) };
   }
 
+
+  async uploadAdminProfilePhotoV2(
+    uid: string,
+    file: { originalname: string; mimetype: string; size: number; buffer: Buffer },
+  ): Promise<{ photoUrl: string }> {
+    if (file.mimetype !== 'image/jpeg' || file.size > 2 * 1024 * 1024) {
+      throw new BadRequestException('La photo doit être un JPEG de 2 Mo maximum');
+    }
+    const ref = this.firebase.getFirestore().collection('users').doc(uid);
+    const snapshot = await ref.get();
+    if (!snapshot.exists) throw new NotFoundException('Compte introuvable');
+    const user = snapshot.data() as User;
+    if (user.role !== AccountRole.ADMIN || user.status !== AccountStatus.ACTIVE) {
+      throw new ForbiddenException('Seul un administrateur actif peut modifier sa photo');
+    }
+    const url = process.env.SUPABASE_URL?.replace(/\/+$/, '');
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const bucket = process.env.SUPABASE_STORAGE_BUCKET;
+    if (!url || !serviceRoleKey || !bucket) {
+      throw new ServiceUnavailableException('Configuration de stockage manquante');
+    }
+    const storagePath = `profile-photos/admin/${uid}/avatar.jpg`;
+    const encodedPath = storagePath.split('/').map(encodeURIComponent).join('/');
+    const body = new ArrayBuffer(file.buffer.byteLength);
+    new Uint8Array(body).set(file.buffer);
+    const response = await fetch(
+      `${url}/storage/v1/object/${encodeURIComponent(bucket)}/${encodedPath}`,
+      {
+        method: 'POST',
+        headers: {
+          apikey: serviceRoleKey,
+          Authorization: `Bearer ${serviceRoleKey}`,
+          'Content-Type': 'image/jpeg',
+          'x-upsert': 'true',
+        },
+        body,
+      },
+    );
+    if (!response.ok) {
+      throw new ServiceUnavailableException('Échec du téléversement de la photo');
+    }
+    await ref.update({ photoPath: storagePath, updatedAt: new Date() });
+    return this.getAdminProfilePhotoV2(uid);
+  }
+
+  async getAdminProfilePhotoV2(uid: string): Promise<{ photoUrl: string | null }> {
+    const snapshot = await this.firebase.getFirestore().collection('users').doc(uid).get();
+    if (!snapshot.exists) throw new NotFoundException('Compte introuvable');
+    const user = snapshot.data() as User & { photoPath?: string };
+    if (user.role !== AccountRole.ADMIN || user.status !== AccountStatus.ACTIVE) {
+      throw new ForbiddenException('Accès réservé à un administrateur actif');
+    }
+    if (!user.photoPath) return { photoUrl: null };
+    const url = process.env.SUPABASE_URL?.replace(/\/+$/, '');
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const bucket = process.env.SUPABASE_STORAGE_BUCKET;
+    if (!url || !serviceRoleKey || !bucket) {
+      throw new ServiceUnavailableException('Configuration de stockage manquante');
+    }
+    const encodedPath = user.photoPath.split('/').map(encodeURIComponent).join('/');
+    const response = await fetch(
+      `${url}/storage/v1/object/sign/${encodeURIComponent(bucket)}/${encodedPath}`,
+      {
+        method: 'POST',
+        headers: {
+          apikey: serviceRoleKey,
+          Authorization: `Bearer ${serviceRoleKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ expiresIn: 3600 }),
+      },
+    );
+    if (!response.ok) throw new ServiceUnavailableException('Impossible de générer le lien de la photo');
+    const payload = (await response.json()) as { signedURL?: string };
+    return { photoUrl: payload.signedURL ? `${url}/storage/v1${payload.signedURL}` : null };
+  }
+
   async logoutV2(firebaseUser: DecodedIdToken): Promise<{ message: string }> {
     await this.firebase.getAuth().revokeRefreshTokens(firebaseUser.uid);
     return { message: 'Firebase sessions revoked' };
