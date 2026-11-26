@@ -82,6 +82,22 @@ describe('NotificationsService', () => {
     );
   });
 
+  it('does not create or deliver a message notification to its sender', async () => {
+    await service.publish({
+      userId: 'patient-uid',
+      senderUserId: 'patient-uid',
+      type: NotificationType.NEW_MESSAGE,
+      title: 'Nouveau message',
+      body: 'Mon propre message',
+      targetUrl: '/patient/messages',
+    });
+
+    expect(createNotification).not.toHaveBeenCalled();
+    expect(getDevices).not.toHaveBeenCalled();
+    expect(triggerNovu).not.toHaveBeenCalled();
+    expect(sendEachForMulticast).not.toHaveBeenCalled();
+  });
+
   it('routes Flutter devices through Novu while keeping direct FCM for other clients', async () => {
     getDevices.mockResolvedValueOnce({
       docs: [
