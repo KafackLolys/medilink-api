@@ -495,6 +495,7 @@ export class NotificationsService {
       .where('userId', '==', firebaseUser.uid)
       .get();
     const notifications = snapshot.docs
+      .filter((document) => document.data().senderUserId !== firebaseUser.uid)
       .map((document) => {
         const notification = document.data() as Notification;
         const createdAt = toDate(notification.createdAt);
