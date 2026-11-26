@@ -193,7 +193,7 @@ export class MessagesService {
 
     const items = snapshot.docs
       .reverse()
-      .map((document) => {
+      .map((document): MessageItem | null => {
         const data = document.data();
         const sentAt = asDate(data.sentAt);
         if (!sentAt || typeof data.body !== 'string') {
@@ -209,7 +209,7 @@ export class MessagesService {
           readAt: asDate(data.readAt)?.toISOString() ?? null,
         } satisfies MessageItem;
       })
-      .filter((item): item is MessageItem => item !== null);
+      .filter((item: MessageItem | null): item is MessageItem => item !== null);
     return { items };
   }
 
@@ -217,6 +217,7 @@ export class MessagesService {
     firebaseUser: DecodedIdToken,
     id: string,
     rawBody: unknown,
+    clientMessageId?: unknown,
   ): Promise<MessageItem> {
     if (
       typeof rawBody !== 'string' ||
@@ -232,17 +233,21 @@ export class MessagesService {
     const recipientUserId = isDoctor
       ? context.patientUserId
       : context.doctorUserId;
-    if (
-      typeof clientMessageId !== 'string' ||
-      !/^[A-Za-z0-9_-]{16,128}$/.test(clientMessageId)
-    ) {
-      throw new BadRequestException('clientMessageId invalide');
-    }
+    const requestMessageId =
+      clientMessageId === undefined || clientMessageId === null
+        ? randomUUID()
+        : typeof clientMessageId === 'string' &&
+            /^[A-Za-z0-9_-]{16,128}$/.test(clientMessageId)
+          ? clientMessageId
+          : (() => {
+              throw new BadRequestException('clientMessageId invalide');
+            })();
+
     const now = new Date();
     // Même utilisateur + conversation + identifiant client = même document.
     // Un timeout suivi d'un retry ne peut donc pas créer un second message.
     const messageId = createHash('sha256')
-       .update(`${firebaseUser.uid}:${context.id}:${requestMessageId}`)
+      .update(`${firebaseUser.uid}:${context.id}:${requestMessageId}`)
       .digest('hex');
     const firestore = this.firebase.getFirestore();
     const conversationRef = firestore.collection('conversations').doc(context.id);
@@ -265,12 +270,15 @@ export class MessagesService {
           ? data.sentAt
           : data.sentAt?.toDate?.() ?? new Date(data.sentAt);
         return {
-          id: existing.id,
-          senderUserId: String(data.senderUserId),
-          body: String(data.body),
-          sentAt: sentAt.toISOString(),
-          readAt: data.readAt?.toDate?.()?.toISOString?.() ?? null,
-        } satisfies MessageItem;
+          message: {
+            id: existing.id,
+            senderUserId: String(data.senderUserId),
+            body: String(data.body),
+            sentAt: sentAt.toISOString(),
+            readAt: data.readAt?.toDate?.()?.toISOString?.() ?? null,
+          } satisfies MessageItem,
+          wasCreated: false,
+        };
       }
       const conversationSnapshot = await transaction.get(conversationRef);
       transaction.set(conversationRef, {
@@ -296,27 +304,28 @@ export class MessagesService {
 
     if (persistedResult.wasCreated) {
       try {
-      await this.notifications.publish({
-        userId: recipientUserId,
-        senderUserId: firebaseUser.uid,
-        type: NotificationType.NEW_MESSAGE,
-        title: isDoctor
-          ? 'Nouveau message de votre médecin'
-          : 'Nouveau message d’un patient',
-        body: message.body,
-        targetUrl: `${isDoctor ? '/patient/profil?activeContent=messages&tab=messages&' : '/medecin/messages?'}conversation=${context.id}`,
-        data: {
-          conversationId: context.id,
-          messageId,
-        },
-      });
-    } catch (error) {
-      this.logger.error(
-        `Message ${messageId} was saved, but its notification could not be sent`,
-        error instanceof Error ? error.stack : undefined,
-      );
+        await this.notifications.publish({
+          userId: recipientUserId,
+          senderUserId: firebaseUser.uid,
+          type: NotificationType.NEW_MESSAGE,
+          title: isDoctor
+            ? 'Nouveau message de votre médecin'
+            : 'Nouveau message d’un patient',
+          body: message.body,
+          targetUrl: `${isDoctor ? '/patient/profil?activeContent=messages&tab=messages&' : '/medecin/messages?'}conversation=${context.id}`,
+          data: {
+            conversationId: context.id,
+            messageId,
+          },
+        });
+      } catch (error) {
+        this.logger.error(
+          `Message ${messageId} was saved, but its notification could not be sent`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
     }
-    return message;
+    return persistedResult.message;
   }
 
   async getConversationParticipants(userId: string, id: string): Promise<{ doctorUserId: string; patientUserId: string }> {
@@ -553,10 +562,49 @@ export class MessagesService {
       .collection('conversations')
       .doc(context.id)
       .collection('messages');
-    const snapshot = await messages.orderBy('sentAt', 'desc').limit(100).get();
+    const [snapshot, receivedMessages] = await Promise.all([
+      messages.orderBy('sentAt', 'desc').limit(100).get(),
+      messages.where('receiverUserId', '==', firebaseUser.uid).get(),
+    ]);
+
+    // `readAt` is reported below as `now` for unread received messages, so it
+    // must actually be persisted, otherwise the client is lied to and unread
+    // counts never decrease after listing a conversation.
+    const unreadMessages = receivedMessages.docs.filter(
+      (document) => !document.data().readAt,
+    );
+    for (let offset = 0; offset < unreadMessages.length; offset += 450) {
+      const batch = this.firebase.getFirestore().batch();
+      for (const document of unreadMessages.slice(offset, offset + 450)) {
+        batch.update(document.ref, { readAt: now });
+      }
+      await batch.commit();
+    }
+
+    const notificationSnapshot = await this.firebase
+      .getFirestore()
+      .collection('notifications')
+      .where('conversationId', '==', context.id)
+      .get();
+    const unreadNotifications = notificationSnapshot.docs.filter(
+      (document) =>
+        document.data().userId === firebaseUser.uid && !document.data().readAt,
+    );
+    for (
+      let offset = 0;
+      offset < unreadNotifications.length;
+      offset += 450
+    ) {
+      const batch = this.firebase.getFirestore().batch();
+      for (const document of unreadNotifications.slice(offset, offset + 450)) {
+        batch.update(document.ref, { readAt: now, updatedAt: now });
+      }
+      await batch.commit();
+    }
+
     const items = snapshot.docs
       .reverse()
-      .map((document) => {
+      .map((document): MessageItem | null => {
         const data = document.data();
         const sentAt = asDate(data.sentAt);
         if (!sentAt || typeof data.body !== 'string') {
@@ -575,7 +623,7 @@ export class MessagesService {
               : (asDate(data.readAt)?.toISOString() ?? null),
         } satisfies MessageItem;
       })
-      .filter((item): item is MessageItem => item !== null);
+      .filter((item: MessageItem | null): item is MessageItem => item !== null);
     return { items };
   }
 
