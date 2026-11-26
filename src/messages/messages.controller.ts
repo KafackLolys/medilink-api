@@ -35,7 +35,7 @@ export class MessagesController {
   sendMessage(
     @Req() request: AuthenticatedRequest,
     @Param('id') conversationId: string,
-    @Body() body: { body?: unknown },
+    @Body() body: { body?: unknown; clientMessageId?: unknown },
   ) {
     return this.messages.sendMessage(
       request.firebaseUser,
@@ -75,11 +75,33 @@ export class MessagesController {
     @Param('id') conversationId: string,
     @Body() body: { body?: unknown },
   ) {
-    const message = await this.messages.sendMessageV2(request.firebaseUser, conversationId, body?.body);
-    const participants = await this.messages.getConversationParticipants(request.firebaseUser.uid, conversationId);
-    const recipientUserId = participants.doctorUserId === request.firebaseUser.uid ? participants.patientUserId : participants.doctorUserId;
-    const unreadCount = await this.messages.getUnreadCount(recipientUserId, conversationId);
-    this.gateway.publishNewMessage(conversationId, message, recipientUserId, unreadCount);
+    const result = await this.messages.sendMessageV2(
+      request.firebaseUser,
+      conversationId,
+      body?.body,
+      body?.clientMessageId,
+    );
+    const { wasCreated, ...message } = result;
+    if (wasCreated) {
+      const participants = await this.messages.getConversationParticipants(
+        request.firebaseUser.uid,
+        conversationId,
+      );
+      const recipientUserId =
+        participants.doctorUserId === request.firebaseUser.uid
+          ? participants.patientUserId
+          : participants.doctorUserId;
+      const unreadCount = await this.messages.getUnreadCount(
+        recipientUserId,
+        conversationId,
+      );
+      this.gateway.publishNewMessage(
+        conversationId,
+        message,
+        recipientUserId,
+        unreadCount,
+      );
+    }
     return message;
   }
 }
