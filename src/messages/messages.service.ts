@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -214,7 +215,8 @@ export class MessagesService {
     firebaseUser: DecodedIdToken,
     id: string,
     rawBody: unknown,
-  ): Promise<MessageItem> {
+    clientMessageId?: unknown,
+  ): Promise<MessageItem & { wasCreated?: boolean }> {
     if (
       typeof rawBody !== 'string' ||
       !rawBody.trim() ||
@@ -229,14 +231,21 @@ export class MessagesService {
     const recipientUserId = isDoctor
       ? context.patientUserId
       : context.doctorUserId;
+    if (
+      typeof clientMessageId !== 'string' ||
+      !/^[A-Za-z0-9_-]{16,128}$/.test(clientMessageId)
+    ) {
+      throw new BadRequestException('clientMessageId invalide');
+    }
     const now = new Date();
-    const messageId = randomUUID();
+    // Même utilisateur + conversation + identifiant client = même document.
+    // Un timeout suivi d'un retry ne peut donc pas créer un second message.
+    const messageId = createHash('sha256')
+      .update(`${firebaseUser.uid}:${context.id}:${clientMessageId}`)
+      .digest('hex');
     const firestore = this.firebase.getFirestore();
-    const conversationRef = firestore
-      .collection('conversations')
-      .doc(context.id);
+    const conversationRef = firestore.collection('conversations').doc(context.id);
     const messageRef = conversationRef.collection('messages').doc(messageId);
-    const conversationSnapshot = await conversationRef.get();
     const message: MessageItem = {
       id: messageId,
       senderUserId: firebaseUser.uid,
@@ -244,11 +253,27 @@ export class MessagesService {
       sentAt: now.toISOString(),
       readAt: null,
     };
-
-    const batch = firestore.batch();
-    batch.set(
-      conversationRef,
-      {
+    let wasCreated = false;
+    const persistedMessage = await firestore.runTransaction(async (transaction) => {
+      const existing = await transaction.get(messageRef);
+      if (existing.exists) {
+        const data = existing.data()!;
+        if (data.senderUserId !== firebaseUser.uid || data.body !== message.body) {
+          throw new ConflictException('Cet identifiant de message est déjà utilisé.');
+        }
+        const sentAt = data.sentAt instanceof Date
+          ? data.sentAt
+          : data.sentAt?.toDate?.() ?? new Date(data.sentAt);
+        return {
+          id: existing.id,
+          senderUserId: String(data.senderUserId),
+          body: String(data.body),
+          sentAt: sentAt.toISOString(),
+          readAt: data.readAt?.toDate?.()?.toISOString?.() ?? null,
+        } satisfies MessageItem;
+      }
+      const conversationSnapshot = await transaction.get(conversationRef);
+      transaction.set(conversationRef, {
         id: context.id,
         patientProfileId: context.patientUserId,
         patientUserId: context.patientUserId,
@@ -258,18 +283,20 @@ export class MessagesService {
         lastMessageAt: now,
         updatedAt: now,
         ...(!conversationSnapshot.exists ? { createdAt: now } : {}),
-      },
-      { merge: true },
-    );
-    batch.create(messageRef, {
-      ...message,
-      conversationId: context.id,
-      receiverUserId: recipientUserId,
-      sentAt: now,
+      }, { merge: true });
+      transaction.create(messageRef, {
+        ...message,
+        clientMessageId,
+        conversationId: context.id,
+        receiverUserId: recipientUserId,
+        sentAt: now,
+      });
+      wasCreated = true;
+      return message;
     });
-    await batch.commit();
 
-    try {
+    if (wasCreated) {
+      try {
       await this.notifications.publish({
         userId: recipientUserId,
         senderUserId: firebaseUser.uid,
@@ -689,6 +716,6 @@ export class MessagesService {
         error instanceof Error ? error.stack : undefined,
       );
     }
-    return message;
+    return { ...persistedMessage, wasCreated };
   }
 }
