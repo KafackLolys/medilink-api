@@ -215,8 +215,7 @@ export class MessagesService {
     firebaseUser: DecodedIdToken,
     id: string,
     rawBody: unknown,
-    clientMessageId?: unknown,
-  ): Promise<MessageItem & { wasCreated?: boolean }> {
+  ): Promise<MessageItem> {
     if (
       typeof rawBody !== 'string' ||
       !rawBody.trim() ||
@@ -641,7 +640,8 @@ export class MessagesService {
     firebaseUser: DecodedIdToken,
     id: string,
     rawBody: unknown,
-  ): Promise<MessageItem> {
+    clientMessageId?: unknown,
+  ): Promise<MessageItem & { wasCreated?: boolean }> {
     if (
       typeof rawBody !== 'string' ||
       !rawBody.trim() ||
