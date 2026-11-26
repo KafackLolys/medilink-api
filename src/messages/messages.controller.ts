@@ -35,7 +35,7 @@ export class MessagesController {
   sendMessage(
     @Req() request: AuthenticatedRequest,
     @Param('id') conversationId: string,
-    @Body() body: { body?: unknown; clientMessageId?: unknown },
+    @Body() body: { body?: unknown },
   ) {
     return this.messages.sendMessage(
       request.firebaseUser,
@@ -73,7 +73,7 @@ export class MessagesController {
   async sendMessageV2(
     @Req() request: AuthenticatedRequest,
     @Param('id') conversationId: string,
-    @Body() body: { body?: unknown },
+    @Body() body: { body?: unknown; clientMessageId?: unknown },
   ) {
     const result = await this.messages.sendMessageV2(
       request.firebaseUser,
