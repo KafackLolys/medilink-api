@@ -1221,7 +1221,7 @@ export class AuthService {
   async uploadAdminProfilePhotoV2(
     uid: string,
     file: { originalname: string; mimetype: string; size: number; buffer: Buffer },
-  ): Promise<{ photoUrl: string }> {
+  ): Promise<{ photoUrl: string | null }> {
     if (file.mimetype !== 'image/jpeg' || file.size > 2 * 1024 * 1024) {
       throw new BadRequestException('La photo doit être un JPEG de 2 Mo maximum');
     }
