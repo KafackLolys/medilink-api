@@ -1329,7 +1329,7 @@ export class DoctorsService {
     ) {
       throw new BadRequestException('Photo JPEG invalide ou supérieure à 2 Mo');
     }
-    const storagePath = `profile-photos/doctor/${uid}/avatar-${Date.now()}.jpg`;
+    const storagePath = `profile-photos/doctor/${uid}/avatar-${randomUUID()}.jpg`;
     await this.uploadFile(storagePath, file);
     await userRef.update({ photoPath: storagePath, updatedAt: new Date() });
     return { photoUrl: await this.createSignedUrl(storagePath) };
