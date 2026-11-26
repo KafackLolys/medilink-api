@@ -832,12 +832,6 @@ export class NeedsService {
     const modesQuery = db
       .collection('doctorConsultationModes')
       .where('doctorProfileId', '==', doctorProfileId);
-    const weeklyQuery = db
-      .collection('doctorWeeklyAvailabilities')
-      .where('doctorProfileId', '==', doctorProfileId);
-    const blockedQuery = db
-      .collection('doctorBlockedDates')
-      .where('doctorProfileId', '==', doctorProfileId);
     const addressesQuery = db
       .collection('addresses')
       .where('userId', '==', firebaseUser.uid);
@@ -854,8 +848,6 @@ export class NeedsService {
         allProposals,
         appointmentsSnapshot,
         modesSnapshot,
-        weeklySnapshot,
-        blockedSnapshot,
         addressesSnapshot,
       ] = await Promise.all([
         tx.get(needRef),
@@ -866,8 +858,6 @@ export class NeedsService {
         tx.get(allProposalsQuery),
         tx.get(appointmentsQuery),
         tx.get(modesQuery),
-        tx.get(weeklyQuery),
-        tx.get(blockedQuery),
         tx.get(addressesQuery),
       ]);
       if (!needSnapshot.exists)
@@ -962,54 +952,6 @@ export class NeedsService {
           ? doctor.defaultAppointmentDurationMinutes
           : 30;
       const endsAt = new Date(startsAt.getTime() + duration * 60_000);
-      const localParts = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'Africa/Douala',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        weekday: 'long',
-        hour: '2-digit',
-        minute: '2-digit',
-        hourCycle: 'h23',
-      }).formatToParts(startsAt);
-      const local = Object.fromEntries(
-        localParts.map(({ type, value }) => [type, value]),
-      );
-      const weekday = local.weekday.toLowerCase();
-      const day = `${local.year}-${local.month}-${local.day}`;
-      const minutes = Number(local.hour) * 60 + Number(local.minute);
-      const available = weeklySnapshot.docs.some((doc) => {
-        const slot = doc.data();
-        const [sh, sm] = String(slot.startTime).split(':').map(Number);
-        const [eh, em] = String(slot.endTime).split(':').map(Number);
-        return (
-          slot.isAvailable === true &&
-          slot.weekday === weekday &&
-          minutes >= sh * 60 + sm &&
-          minutes + duration <= eh * 60 + em
-        );
-      });
-      if (!available)
-        throw new BadRequestException(
-          "Le médecin n'est pas disponible à l'heure proposée",
-        );
-      const blocked = blockedSnapshot.docs.some((doc) => {
-        const value = doc.data().date as Date | Timestamp;
-        const parts = new Intl.DateTimeFormat('en-GB', {
-          timeZone: 'Africa/Douala',
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-        }).formatToParts(dateFromFirestore(value));
-        const localDay = Object.fromEntries(
-          parts.map(({ type, value }) => [type, value]),
-        );
-        return `${localDay.year}-${localDay.month}-${localDay.day}` === day;
-      });
-      if (blocked)
-        throw new BadRequestException(
-          'Le médecin est indisponible à la date proposée',
-        );
       const conflict = appointmentsSnapshot.docs.some((doc) => {
         const old = doc.data();
         if (
