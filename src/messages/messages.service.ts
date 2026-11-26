@@ -254,8 +254,7 @@ export class MessagesService {
       sentAt: now.toISOString(),
       readAt: null,
     };
-    let wasCreated = false;
-    const persistedMessage = await firestore.runTransaction(async (transaction) => {
+    const persistedResult = await firestore.runTransaction(async (transaction) => {
       const existing = await transaction.get(messageRef);
       if (existing.exists) {
         const data = existing.data()!;
@@ -292,11 +291,10 @@ export class MessagesService {
         receiverUserId: recipientUserId,
         sentAt: now,
       });
-      wasCreated = true;
-      return message;
+      return { message, wasCreated: true };
     });
 
-    if (wasCreated) {
+    if (persistedResult.wasCreated) {
       try {
       await this.notifications.publish({
         userId: recipientUserId,
@@ -698,12 +696,15 @@ export class MessagesService {
           ? rawReadAt.toISOString()
           : rawReadAt?.toDate?.()?.toISOString?.() ?? null;
         return {
-          id: existing.id,
-          senderUserId: String(data.senderUserId),
-          body: String(data.body),
-          sentAt: sentAt.toISOString(),
-          readAt,
-        } satisfies MessageItem;
+          message: {
+            id: existing.id,
+            senderUserId: String(data.senderUserId),
+            body: String(data.body),
+            sentAt: sentAt.toISOString(),
+            readAt,
+          } satisfies MessageItem,
+          wasCreated: false,
+        };
       }
 
       const conversationSnapshot = await transaction.get(conversationRef);
@@ -752,6 +753,10 @@ export class MessagesService {
         );
       }
     }
-    return { ...persistedMessage, clientMessageId, wasCreated };
+    return {
+      ...persistedResult.message,
+      clientMessageId,
+      wasCreated: persistedResult.wasCreated,
+    };
   }
 }
