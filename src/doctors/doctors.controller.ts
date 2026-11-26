@@ -25,6 +25,7 @@ import {
 } from './doctors.service';
 
 const MAX_DOCUMENT_SIZE = 10 * 1024 * 1024;
+const MAX_PROFILE_PHOTO_SIZE = 2 * 1024 * 1024;
 
 @Controller('doctors')
 @UseGuards(FirebaseAuthGuard)
@@ -106,6 +107,25 @@ export class DoctorsController {
   @Get('v2/me')
   getMineV2(@Req() request: AuthenticatedRequest) {
     return this.doctorsService.getMineV2(request.firebaseUser.uid);
+  }
+
+  @Post('v2/me/photo')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_PROFILE_PHOTO_SIZE, files: 1 },
+    }),
+  )
+  uploadMyProfilePhotoV2(
+    @Req() request: AuthenticatedRequest,
+    @UploadedFile() file?: UploadedDoctorDocument,
+  ) {
+    if (!file) throw new BadRequestException('Une photo est requise');
+    return this.doctorsService.uploadMyProfilePhotoV2(request.firebaseUser.uid, file);
+  }
+
+  @Get('v2/me/photo')
+  getMyProfilePhotoV2(@Req() request: AuthenticatedRequest) {
+    return this.doctorsService.getMyProfilePhotoV2(request.firebaseUser.uid);
   }
 
   @Get('v2/me/reviews')
