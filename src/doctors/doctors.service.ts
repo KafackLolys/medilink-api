@@ -1307,6 +1307,45 @@ export class DoctorsService {
     };
   }
 
+  async uploadMyProfilePhotoV2(
+    uid: string,
+    file: UploadedDoctorDocument,
+  ): Promise<{ photoUrl: string }> {
+    const userRef = this.firebase.getFirestore().collection('users').doc(uid);
+    const snapshot = await userRef.get();
+    if (!snapshot.exists) throw new NotFoundException('Doctor account not found');
+    const user = snapshot.data() as User;
+    if (user.role !== AccountRole.DOCTOR || user.status !== AccountStatus.ACTIVE) {
+      throw new NotFoundException('Active doctor account not found');
+    }
+    if (
+      !file ||
+      !Buffer.isBuffer(file.buffer) ||
+      file.size <= 0 ||
+      file.size > 2 * 1024 * 1024 ||
+      file.buffer.length !== file.size ||
+      file.mimetype !== 'image/jpeg' ||
+      !this.hasValidSignature(file)
+    ) {
+      throw new BadRequestException('Photo JPEG invalide ou supérieure à 2 Mo');
+    }
+    const storagePath = `profile-photos/doctor/${uid}/avatar-${Date.now()}.jpg`;
+    await this.uploadFile(storagePath, file);
+    await userRef.update({ photoPath: storagePath, updatedAt: new Date() });
+    return { photoUrl: await this.createSignedUrl(storagePath) };
+  }
+
+  async getMyProfilePhotoV2(uid: string): Promise<{ photoUrl: string | null }> {
+    const snapshot = await this.firebase.getFirestore().collection('users').doc(uid).get();
+    if (!snapshot.exists) throw new NotFoundException('Doctor account not found');
+    const user = snapshot.data() as User & { photoPath?: string };
+    if (user.role !== AccountRole.DOCTOR || user.status !== AccountStatus.ACTIVE) {
+      throw new NotFoundException('Active doctor account not found');
+    }
+    if (!user.photoPath) return { photoUrl: null };
+    return { photoUrl: await this.createSignedUrl(user.photoPath) };
+  }
+
   async updateMyProfileV2(
     uid: string,
     body: {
