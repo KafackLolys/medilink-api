@@ -651,19 +651,25 @@ export class MessagesService {
         'Message body must contain 1 to 4000 characters',
       );
     }
+    if (
+      typeof clientMessageId !== 'string' ||
+      !/^[A-Za-z0-9_-]{16,128}$/.test(clientMessageId)
+    ) {
+      throw new BadRequestException('clientMessageId invalide');
+    }
+
     const context = await this.getConversationContext(firebaseUser.uid, id);
     const isDoctor = context.doctorUserId === firebaseUser.uid;
     const recipientUserId = isDoctor
       ? context.patientUserId
       : context.doctorUserId;
     const now = new Date();
-    const messageId = randomUUID();
+    const messageId = createHash('sha256')
+      .update(`${firebaseUser.uid}:${context.id}:${clientMessageId}`)
+      .digest('hex');
     const firestore = this.firebase.getFirestore();
-    const conversationRef = firestore
-      .collection('conversations')
-      .doc(context.id);
+    const conversationRef = firestore.collection('conversations').doc(context.id);
     const messageRef = conversationRef.collection('messages').doc(messageId);
-    const conversationSnapshot = await conversationRef.get();
     const message: MessageItem = {
       id: messageId,
       senderUserId: firebaseUser.uid,
@@ -672,49 +678,76 @@ export class MessagesService {
       readAt: null,
     };
 
-    const batch = firestore.batch();
-    batch.set(
-      conversationRef,
-      {
-        id: context.id,
-        patientProfileId: context.patientUserId,
-        patientUserId: context.patientUserId,
-        doctorProfileId: context.doctorProfileId,
-        doctorUserId: context.doctorUserId,
-        needId: context.requestId,
-        lastMessageAt: now,
-        updatedAt: now,
-        ...(!conversationSnapshot.exists ? { createdAt: now } : {}),
-      },
-      { merge: true },
-    );
-    batch.create(messageRef, {
-      ...message,
-      conversationId: context.id,
-      receiverUserId: recipientUserId,
-      sentAt: now,
-    });
-    await batch.commit();
+    let wasCreated = false;
+    const persistedMessage = await firestore.runTransaction(async (transaction) => {
+      const existing = await transaction.get(messageRef);
+      if (existing.exists) {
+        const data = existing.data()!;
+        if (data.senderUserId !== firebaseUser.uid || data.body !== message.body) {
+          throw new ConflictException('Cet identifiant de message est déjà utilisé.');
+        }
+        const rawSentAt = data.sentAt;
+        const sentAt = rawSentAt instanceof Date
+          ? rawSentAt
+          : rawSentAt?.toDate?.() ?? new Date(rawSentAt);
+        const rawReadAt = data.readAt;
+        const readAt = rawReadAt instanceof Date
+          ? rawReadAt.toISOString()
+          : rawReadAt?.toDate?.()?.toISOString?.() ?? null;
+        return {
+          id: existing.id,
+          senderUserId: String(data.senderUserId),
+          body: String(data.body),
+          sentAt: sentAt.toISOString(),
+          readAt,
+        } satisfies MessageItem;
+      }
 
-    try {
-      await this.notifications.publish({
-        userId: recipientUserId,
-        type: NotificationType.NEW_MESSAGE,
-        title: isDoctor
-          ? 'Nouveau message de votre médecin'
-          : 'Nouveau message d’un patient',
-        body: message.body,
-        targetUrl: `${isDoctor ? '/patient/profil?activeContent=messages&tab=messages&' : '/medecin/messages?'}conversation=${context.id}`,
-        data: {
-          conversationId: context.id,
-          messageId,
+      const conversationSnapshot = await transaction.get(conversationRef);
+      transaction.set(
+        conversationRef,
+        {
+          id: context.id,
+          patientProfileId: context.patientUserId,
+          patientUserId: context.patientUserId,
+          doctorProfileId: context.doctorProfileId,
+          doctorUserId: context.doctorUserId,
+          needId: context.requestId,
+          lastMessageAt: now,
+          updatedAt: now,
+          ...(!conversationSnapshot.exists ? { createdAt: now } : {}),
         },
-      });
-    } catch (error) {
-      this.logger.error(
-        `Message ${messageId} was saved, but its notification could not be sent`,
-        error instanceof Error ? error.stack : undefined,
+        { merge: true },
       );
+      transaction.create(messageRef, {
+        ...message,
+        clientMessageId,
+        conversationId: context.id,
+        receiverUserId: recipientUserId,
+        sentAt: now,
+      });
+      wasCreated = true;
+      return message;
+    });
+
+    if (wasCreated) {
+      try {
+        await this.notifications.publish({
+          userId: recipientUserId,
+          type: NotificationType.NEW_MESSAGE,
+          title: isDoctor
+            ? 'Nouveau message de votre médecin'
+            : 'Nouveau message d’un patient',
+          body: message.body,
+          targetUrl: `${isDoctor ? '/patient/profil?activeContent=messages&tab=messages&' : '/medecin/messages?'}conversation=${context.id}`,
+          data: { conversationId: context.id, messageId },
+        });
+      } catch (error) {
+        this.logger.error(
+          `Message ${messageId} was saved, but its notification could not be sent`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
     }
     return { ...persistedMessage, wasCreated };
   }
