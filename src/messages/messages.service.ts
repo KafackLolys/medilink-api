@@ -569,6 +569,7 @@ export class MessagesService {
           id: document.id,
           senderUserId: String(data.senderUserId ?? ''),
           body: data.body,
+          clientMessageId: typeof data.clientMessageId === 'string' ? data.clientMessageId : undefined,
           sentAt: sentAt.toISOString(),
           readAt:
             data.receiverUserId === firebaseUser.uid && !data.readAt
