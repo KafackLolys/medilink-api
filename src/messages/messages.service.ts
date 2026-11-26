@@ -749,6 +749,6 @@ export class MessagesService {
         );
       }
     }
-    return { ...persistedMessage, wasCreated };
+    return { ...persistedMessage, clientMessageId, wasCreated };
   }
 }
