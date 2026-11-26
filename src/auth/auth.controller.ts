@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  BadRequestException,
   Get,
   HttpCode,
   HttpStatus,
@@ -8,7 +9,10 @@ import {
   Post,
   Req,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   AuthService,
   type LoginRequest,
@@ -19,6 +23,8 @@ import {
 } from './auth.service';
 import type { AuthenticatedRequest } from './authenticated-request.interface';
 import { FirebaseAuthGuard } from './firebase-auth.guard';
+
+const MAX_ADMIN_PROFILE_PHOTO_SIZE = 2 * 1024 * 1024;
 
 @Controller('auth')
 export class AuthController {
@@ -137,6 +143,27 @@ export class AuthController {
       request.firebaseUser.uid,
       body,
     );
+  }
+
+  @Post('v2/admin/profile/photo')
+  @UseGuards(FirebaseAuthGuard)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_ADMIN_PROFILE_PHOTO_SIZE, files: 1 },
+    }),
+  )
+  uploadAdminProfilePhotoV2(
+    @Req() request: AuthenticatedRequest,
+    @UploadedFile() file?: { originalname: string; mimetype: string; size: number; buffer: Buffer },
+  ) {
+    if (!file) throw new BadRequestException('Une photo est requise');
+    return this.authService.uploadAdminProfilePhotoV2(request.firebaseUser.uid, file);
+  }
+
+  @Get('v2/admin/profile/photo')
+  @UseGuards(FirebaseAuthGuard)
+  getAdminProfilePhotoV2(@Req() request: AuthenticatedRequest) {
+    return this.authService.getAdminProfilePhotoV2(request.firebaseUser.uid);
   }
 
   @Post('v2/logout')
