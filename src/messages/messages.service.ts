@@ -272,6 +272,7 @@ export class MessagesService {
     try {
       await this.notifications.publish({
         userId: recipientUserId,
+        senderUserId: firebaseUser.uid,
         type: NotificationType.NEW_MESSAGE,
         title: isDoctor
           ? 'Nouveau message de votre médecin'
