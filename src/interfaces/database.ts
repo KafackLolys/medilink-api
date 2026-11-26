@@ -430,6 +430,8 @@ export interface Notification extends Timestamped {
   targetUrl: string | null;
   /** Conversation associated with message notifications, when applicable. */
   conversationId?: string;
+  /** Original author of a message notification, used to prevent self-notifications. */
+  senderUserId?: string;
   readAt: Date | null;
 }
 
