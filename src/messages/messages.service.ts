@@ -242,7 +242,7 @@ export class MessagesService {
     // Même utilisateur + conversation + identifiant client = même document.
     // Un timeout suivi d'un retry ne peut donc pas créer un second message.
     const messageId = createHash('sha256')
-      .update(`${firebaseUser.uid}:${context.id}:${clientMessageId}`)
+       .update(`${firebaseUser.uid}:${context.id}:${requestMessageId}`)
       .digest('hex');
     const firestore = this.firebase.getFirestore();
     const conversationRef = firestore.collection('conversations').doc(context.id);
@@ -286,7 +286,7 @@ export class MessagesService {
       }, { merge: true });
       transaction.create(messageRef, {
         ...message,
-        clientMessageId,
+        clientMessageId: requestMessageId,
         conversationId: context.id,
         receiverUserId: recipientUserId,
         sentAt: now,
@@ -652,12 +652,15 @@ export class MessagesService {
         'Message body must contain 1 to 4000 characters',
       );
     }
-    if (
-      typeof clientMessageId !== 'string' ||
-      !/^[A-Za-z0-9_-]{16,128}$/.test(clientMessageId)
-    ) {
-      throw new BadRequestException('clientMessageId invalide');
-    }
+    // Older web clients may omit the key; keep them compatible while
+    // mobile clients send a stable key that survives retries.
+    const requestMessageId =
+      clientMessageId === undefined || clientMessageId === null
+        ? randomUUID()
+        : typeof clientMessageId === 'string' &&
+            /^[A-Za-z0-9_-]{16,128}$/.test(clientMessageId)
+          ? clientMessageId
+          : (() => { throw new BadRequestException('clientMessageId invalide'); })();
 
     const context = await this.getConversationContext(firebaseUser.uid, id);
     const isDoctor = context.doctorUserId === firebaseUser.uid;
@@ -755,7 +758,7 @@ export class MessagesService {
     }
     return {
       ...persistedResult.message,
-      clientMessageId,
+      clientMessageId: requestMessageId,
       wasCreated: persistedResult.wasCreated,
     };
   }
