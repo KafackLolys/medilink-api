@@ -652,15 +652,16 @@ export class MessagesService {
         'Message body must contain 1 to 4000 characters',
       );
     }
-    // Older web clients may omit the key; keep them compatible while
-    // mobile clients send a stable key that survives retries.
+    // Older web clients may omit the key; mobile clients send a stable key.
     const requestMessageId =
       clientMessageId === undefined || clientMessageId === null
         ? randomUUID()
         : typeof clientMessageId === 'string' &&
             /^[A-Za-z0-9_-]{16,128}$/.test(clientMessageId)
           ? clientMessageId
-          : (() => { throw new BadRequestException('clientMessageId invalide'); })();
+          : (() => {
+              throw new BadRequestException('clientMessageId invalide');
+            })();
 
     const context = await this.getConversationContext(firebaseUser.uid, id);
     const isDoctor = context.doctorUserId === firebaseUser.uid;
@@ -682,8 +683,7 @@ export class MessagesService {
       readAt: null,
     };
 
-    let wasCreated = false;
-    const persistedMessage = await firestore.runTransaction(async (transaction) => {
+    const persistedResult = await firestore.runTransaction(async (transaction) => {
       const existing = await transaction.get(messageRef);
       if (existing.exists) {
         const data = existing.data()!;
@@ -728,16 +728,15 @@ export class MessagesService {
       );
       transaction.create(messageRef, {
         ...message,
-        clientMessageId,
+        clientMessageId: requestMessageId,
         conversationId: context.id,
         receiverUserId: recipientUserId,
         sentAt: now,
       });
-      wasCreated = true;
-      return message;
+      return { message, wasCreated: true };
     });
 
-    if (wasCreated) {
+    if (persistedResult.wasCreated) {
       try {
         await this.notifications.publish({
           userId: recipientUserId,
@@ -756,6 +755,7 @@ export class MessagesService {
         );
       }
     }
+
     return {
       ...persistedResult.message,
       clientMessageId: requestMessageId,
