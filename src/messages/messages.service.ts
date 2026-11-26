@@ -669,7 +669,7 @@ export class MessagesService {
       : context.doctorUserId;
     const now = new Date();
     const messageId = createHash('sha256')
-      .update(`${firebaseUser.uid}:${context.id}:${clientMessageId}`)
+      .update(`${firebaseUser.uid}:${context.id}:${requestMessageId}`)
       .digest('hex');
     const firestore = this.firebase.getFirestore();
     const conversationRef = firestore.collection('conversations').doc(context.id);
