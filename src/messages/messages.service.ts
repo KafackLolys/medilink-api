@@ -641,7 +641,7 @@ export class MessagesService {
     id: string,
     rawBody: unknown,
     clientMessageId?: unknown,
-  ): Promise<MessageItem & { wasCreated?: boolean }> {
+  ): Promise<MessageItem & { wasCreated?: boolean; clientMessageId?: string }> {
     if (
       typeof rawBody !== 'string' ||
       !rawBody.trim() ||
