@@ -56,6 +56,7 @@ export interface MessageItem {
   body: string;
   sentAt: string;
   readAt: string | null;
+  clientMessageId?: string;
 }
 
 function asDate(value: unknown): Date | null {
@@ -203,6 +204,7 @@ export class MessagesService {
           id: document.id,
           senderUserId: String(data.senderUserId ?? ''),
           body: data.body,
+          clientMessageId: typeof data.clientMessageId === 'string' ? data.clientMessageId : undefined,
           sentAt: sentAt.toISOString(),
           readAt: asDate(data.readAt)?.toISOString() ?? null,
         } satisfies MessageItem;
