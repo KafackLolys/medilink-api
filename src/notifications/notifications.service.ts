@@ -53,6 +53,8 @@ export interface PublishNotification {
   body: string;
   targetUrl?: string | null;
   data?: Record<string, string>;
+  /** User who caused the notification, when applicable. */
+  senderUserId?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -95,6 +97,7 @@ export class NotificationsService {
       .where('userId', '==', firebaseUser.uid)
       .get();
     const notifications = snapshot.docs
+      .filter((document) => document.data().senderUserId !== firebaseUser.uid)
       .map((document) => {
         const notification = document.data() as Notification;
         const createdAt = toDate(notification.createdAt);
@@ -272,6 +275,14 @@ export class NotificationsService {
   }
 
   async publish(notification: PublishNotification): Promise<void> {
+    // A notification must never be delivered to the user who caused it.
+    // Keep this invariant in the shared publisher so every channel (in-app,
+    // Firebase and Novu) receives the same recipient filtering.
+    if (notification.senderUserId && notification.senderUserId === notification.userId) {
+      this.logger.warn(`Skipping self-notification for user ${notification.userId}`);
+      return;
+    }
+
     const id = randomUUID();
     const now = new Date();
     const record: Notification = {
@@ -283,6 +294,9 @@ export class NotificationsService {
       targetUrl: notification.targetUrl ?? null,
       ...(notification.data?.conversationId
         ? { conversationId: notification.data.conversationId }
+        : {}),
+      ...(notification.senderUserId
+        ? { senderUserId: notification.senderUserId }
         : {}),
       readAt: null,
       createdAt: now,
@@ -481,6 +495,7 @@ export class NotificationsService {
       .where('userId', '==', firebaseUser.uid)
       .get();
     const notifications = snapshot.docs
+      .filter((document) => document.data().senderUserId !== firebaseUser.uid)
       .map((document) => {
         const notification = document.data() as Notification;
         const createdAt = toDate(notification.createdAt);
