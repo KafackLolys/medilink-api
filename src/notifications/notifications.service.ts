@@ -274,6 +274,77 @@ export class NotificationsService {
     await this.novu.syncSubscriberDeviceTokens(userId, tokens, profile);
   }
 
+  /**
+   * Remove notification devices that have not checked in for 60 days.
+   *
+   * Missing or malformed lastUsedAt values are deliberately retained: old
+   * records must not be treated as abandoned without reliable activity data.
+   * Novu credentials are updated before deleting stale Novu records so a
+   * synchronization failure never causes us to discard the Firestore source
+   * of truth.
+   */
+  async cleanupInactiveDevicesForUser(
+    userId: string,
+    profile?: DecodedIdToken,
+    now: Date = new Date(),
+  ): Promise<number> {
+    const retentionMs = 60 * 24 * 60 * 60 * 1000;
+    const cutoff = now.getTime() - retentionMs;
+    const snapshot = await this.firebase
+      .getFirestore()
+      .collection('notificationDevices')
+      .where('userId', '==', userId)
+      .get();
+
+    const staleDocuments = snapshot.docs.filter((document) => {
+      const lastUsedAt = toDate(document.data().lastUsedAt);
+      return lastUsedAt !== null && lastUsedAt.getTime() < cutoff;
+    });
+    if (staleDocuments.length === 0) return 0;
+
+    const staleNovuPaths = new Set(
+      staleDocuments
+        .filter((document) => document.data().pushProvider === 'novu')
+        .map((document) => document.ref.path),
+    );
+
+    if (staleNovuPaths.size > 0) {
+      const activeNovuTokens = [
+        ...new Set(
+          snapshot.docs
+            .filter((document) => !staleNovuPaths.has(document.ref.path))
+            .filter((document) => document.data().pushProvider === 'novu')
+            .map((document) => document.data().token)
+            .filter(
+              (token): token is string =>
+                typeof token === 'string' && token.length > 0,
+            ),
+        ),
+      ];
+      // If Novu is unavailable, keep the old records and let the next
+      // authenticated registration retry the cleanup.
+      await this.novu.syncSubscriberDeviceTokens(
+        userId,
+        activeNovuTokens,
+        profile,
+      );
+    }
+
+    const firestore = this.firebase.getFirestore();
+    for (let offset = 0; offset < staleDocuments.length; offset += 450) {
+      const batch = firestore.batch();
+      for (const document of staleDocuments.slice(offset, offset + 450)) {
+        batch.delete(document.ref);
+      }
+      await batch.commit();
+    }
+
+    this.logger.log(
+      `Removed ${staleDocuments.length} inactive notification device(s) for user ${userId} (60-day retention)`,
+    );
+    return staleDocuments.length;
+  }
+
   async publish(notification: PublishNotification): Promise<void> {
     // A notification must never be delivered to the user who caused it.
     // Keep this invariant in the shared publisher so every channel (in-app,
@@ -662,6 +733,11 @@ export class NotificationsService {
         userId === firebaseUser.uid ? firebaseUser : undefined,
       );
     }
+
+    // Registration is the heartbeat: active installations refresh lastUsedAt.
+    // Clean this subscriber's abandoned installations after saving the current
+    // device, while retaining devices with missing/unparseable timestamps.
+    await this.cleanupInactiveDevicesForUser(firebaseUser.uid, firebaseUser);
 
     return { deviceId: request.deviceId, platform: request.platform, pushProvider };
   }
