@@ -99,7 +99,7 @@ describe('NotificationsService', () => {
   });
 
   it('routes Flutter devices through Novu while keeping direct FCM for other clients', async () => {
-    getDevices.mockResolvedValueOnce({
+    getDevices.mockResolvedValue({
       docs: [
         {
           data: () => ({
@@ -145,7 +145,7 @@ describe('NotificationsService', () => {
 
 
   it('sends one browser push with the local site icon and click destination', async () => {
-    getDevices.mockResolvedValueOnce({
+    getDevices.mockResolvedValue({
       docs: [
         {
           data: () => ({
