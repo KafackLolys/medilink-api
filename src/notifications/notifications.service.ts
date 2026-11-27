@@ -379,6 +379,16 @@ export class NotificationsService {
       .doc(id)
       .create(record);
 
+    // Also prune on delivery, so abandoned tokens are not kept merely
+    // because their owner has not opened the app again.
+    try {
+      await this.cleanupInactiveDevicesForUser(notification.userId);
+    } catch (error) {
+      this.logger.warn(
+        `Inactive device cleanup deferred for user ${notification.userId}: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+    }
+
     const devices = await this.firebase
       .getFirestore()
       .collection('notificationDevices')
