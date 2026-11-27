@@ -20,8 +20,8 @@ describe('NotificationsService', () => {
     triggerNovu.mockResolvedValue(undefined);
     getDevices.mockResolvedValue({
       docs: [
-        { data: () => ({ token: 'fcm-token-device-one' }) },
-        { data: () => ({ token: 'fcm-token-device-two' }) },
+        { data: () => ({ token: 'fcm-token-device-one', platform: 'mobile' }) },
+        { data: () => ({ token: 'fcm-token-device-two', platform: 'mobile' }) },
       ],
     });
     sendEachForMulticast.mockResolvedValue({
@@ -104,12 +104,14 @@ describe('NotificationsService', () => {
         {
           data: () => ({
             token: 'flutter-fcm-token',
+            platform: 'mobile',
             pushProvider: 'novu',
           }),
         },
         {
           data: () => ({
             token: 'native-fcm-token',
+            platform: 'mobile',
             pushProvider: 'firebase',
           }),
         },
@@ -138,6 +140,44 @@ describe('NotificationsService', () => {
     );
     expect(sendEachForMulticast).not.toHaveBeenCalledWith(
       expect.objectContaining({ tokens: ['flutter-fcm-token'] }),
+    );
+  });
+
+
+  it('sends one browser push with the local site icon and click destination', async () => {
+    getDevices.mockResolvedValueOnce({
+      docs: [
+        {
+          data: () => ({
+            token: 'web-fcm-token',
+            platform: 'web',
+            pushProvider: 'firebase',
+          }),
+        },
+      ],
+    });
+
+    await service.publish({
+      userId: 'patient-uid',
+      type: NotificationType.NEW_MESSAGE,
+      title: 'Nouveau message',
+      body: 'Vous avez reçu un message.',
+      targetUrl: '/patient/messages',
+    });
+
+    expect(sendEachForMulticast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tokens: ['web-fcm-token'],
+        webpush: {
+          notification: expect.objectContaining({
+            icon: '/favicon.ico',
+            badge: '/favicon.ico',
+            tag: expect.any(String),
+            renotify: false,
+            data: { url: '/patient/messages' },
+          }),
+        },
+      }),
     );
   });
 

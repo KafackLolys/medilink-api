@@ -428,6 +428,11 @@ export class NotificationsService {
         notification: {
           title: notification.title,
           body: notification.body.slice(0, 700),
+          icon: '/favicon.ico',
+          badge: '/favicon.ico',
+          tag: id,
+          renotify: false,
+          data: { url: notification.targetUrl ?? '/' },
         },
       },
     }));
