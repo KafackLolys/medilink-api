@@ -432,6 +432,7 @@ export class NotificationsService {
           badge: '/favicon.ico',
           tag: id,
           renotify: false,
+          data: { url: notification.targetUrl ?? '/' },
         },
       },
     }));
