@@ -253,7 +253,7 @@ export class NovuService {
             },
           },
           steps: {
-            push-step_st_h4qGirKoNRjylvaW: {
+            'push-step_st_h4qGirKoNRjylvaW': {
               providers: {
                 fcm: {
                   type: 'data',
