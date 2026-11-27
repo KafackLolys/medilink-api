@@ -241,11 +241,26 @@ export class NovuService {
         // then lets Flutter's background handler choose the category icon
         // instead of displaying an automatic notification with the app icon.
         overrides: {
+          // Keep the workflow-wide default, and explicitly target the Push
+          // step used by the MediLink workflow. Some self-hosted Novu versions
+          // apply provider payload overrides only at step scope.
           providers: {
             fcm: {
               type: 'data',
               android: {
                 priority: 'high',
+              },
+            },
+          },
+          steps: {
+            push-step_st_h4qGirKoNRjylvaW: {
+              providers: {
+                fcm: {
+                  type: 'data',
+                  android: {
+                    priority: 'high',
+                  },
+                },
               },
             },
           },

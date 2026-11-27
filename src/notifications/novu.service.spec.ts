@@ -64,6 +64,16 @@ describe('NovuService', () => {
               android: { priority: 'high' },
             },
           },
+          steps: {
+            push-step_st_h4qGirKoNRjylvaW: {
+              providers: {
+                fcm: {
+                  type: 'data',
+                  android: { priority: 'high' },
+                },
+              },
+            },
+          },
         },
       }),
     );
