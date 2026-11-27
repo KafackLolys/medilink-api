@@ -181,6 +181,119 @@ describe('NotificationsService', () => {
     );
   });
 
+
+  describe('inactive notification device retention', () => {
+    it('removes devices older than 60 days and syncs only active Novu tokens', async () => {
+      const now = new Date('2026-11-27T12:00:00.000Z');
+      const staleRef = { path: 'notificationDevices/user_stale' };
+      const activeRef = { path: 'notificationDevices/user_active' };
+      const staleDoc = {
+        ref: staleRef,
+        data: () => ({
+          pushProvider: 'novu',
+          token: 'stale-fcm-token',
+          lastUsedAt: new Date('2026-09-27T11:59:59.000Z'),
+        }),
+      };
+      const activeDoc = {
+        ref: activeRef,
+        data: () => ({
+          pushProvider: 'novu',
+          token: 'active-fcm-token',
+          lastUsedAt: new Date('2026-11-27T11:00:00.000Z'),
+        }),
+      };
+      const batch = { delete: jest.fn(), commit: jest.fn().mockResolvedValue(undefined) };
+      const firestore = {
+        collection: () => ({
+          where: () => ({ get: jest.fn().mockResolvedValue({ docs: [staleDoc, activeDoc] }) }),
+        }),
+        batch: () => batch,
+      };
+      const novuSync = jest.fn().mockResolvedValue(undefined);
+      const cleanupService = new NotificationsService(
+        { getFirestore: () => firestore } as unknown as FirebaseService,
+        { syncSubscriberDeviceTokens: novuSync } as unknown as NovuService,
+      );
+
+      const removed = await cleanupService.cleanupInactiveDevicesForUser(
+        'user',
+        undefined,
+        now,
+      );
+
+      expect(removed).toBe(1);
+      expect(novuSync).toHaveBeenCalledWith('user', ['active-fcm-token'], undefined);
+      expect(batch.delete).toHaveBeenCalledTimes(1);
+      expect(batch.delete).toHaveBeenCalledWith(staleRef);
+      expect(batch.commit).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps devices with missing, invalid, or exactly 60-day timestamps', async () => {
+      const docs = [
+        { ref: { path: 'missing' }, data: () => ({ pushProvider: 'novu', token: 'missing-token' }) },
+        { ref: { path: 'invalid' }, data: () => ({ pushProvider: 'novu', token: 'invalid-token', lastUsedAt: 'not-a-date' }) },
+        { ref: { path: 'boundary' }, data: () => ({ pushProvider: 'novu', token: 'boundary-token', lastUsedAt: new Date('2026-09-28T12:00:00.000Z') }) },
+      ];
+      const batch = { delete: jest.fn(), commit: jest.fn().mockResolvedValue(undefined) };
+      const firestore = {
+        collection: () => ({
+          where: () => ({ get: jest.fn().mockResolvedValue({ docs }) }),
+        }),
+        batch: () => batch,
+      };
+      const novuSync = jest.fn().mockResolvedValue(undefined);
+      const cleanupService = new NotificationsService(
+        { getFirestore: () => firestore } as unknown as FirebaseService,
+        { syncSubscriberDeviceTokens: novuSync } as unknown as NovuService,
+      );
+
+      const removed = await cleanupService.cleanupInactiveDevicesForUser(
+        'user',
+        undefined,
+        new Date('2026-11-27T12:00:00.000Z'),
+      );
+
+      expect(removed).toBe(0);
+      expect(batch.delete).not.toHaveBeenCalled();
+      expect(novuSync).not.toHaveBeenCalled();
+    });
+
+    it('does not delete stale records when Novu synchronization fails', async () => {
+      const staleRef = { path: 'notificationDevices/user_stale' };
+      const docs = [{
+        ref: staleRef,
+        data: () => ({
+          pushProvider: 'novu',
+          token: 'stale-token',
+          lastUsedAt: new Date('2026-01-01T00:00:00.000Z'),
+        }),
+      }];
+      const batch = { delete: jest.fn(), commit: jest.fn().mockResolvedValue(undefined) };
+      const firestore = {
+        collection: () => ({
+          where: () => ({ get: jest.fn().mockResolvedValue({ docs }) }),
+        }),
+        batch: () => batch,
+      };
+      const cleanupService = new NotificationsService(
+        { getFirestore: () => firestore } as unknown as FirebaseService,
+        {
+          syncSubscriberDeviceTokens: jest.fn().mockRejectedValue(new Error('Novu offline')),
+        } as unknown as NovuService,
+      );
+
+      await expect(
+        cleanupService.cleanupInactiveDevicesForUser(
+          'user',
+          undefined,
+          new Date('2026-11-27T12:00:00.000Z'),
+        ),
+      ).rejects.toThrow('Novu offline');
+      expect(batch.delete).not.toHaveBeenCalled();
+    });
+  });
+
   it('does not allow a user to mark another user’s notification as read', async () => {
     getNotification.mockResolvedValue({
       exists: true,
