@@ -237,6 +237,19 @@ export class NovuService {
           // Preserve structured metadata for clients that prefer a nested object.
           data: notification.data ?? {},
         },
+        // Force Novu's FCM provider to send a data-only message. Android
+        // then lets Flutter's background handler choose the category icon
+        // instead of displaying an automatic notification with the app icon.
+        overrides: {
+          providers: {
+            fcm: {
+              type: 'data',
+              android: {
+                priority: 'high',
+              },
+            },
+          },
+        },
       });
     } catch (error) {
       if (error instanceof ServiceUnavailableException) throw error;
